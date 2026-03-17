@@ -15,25 +15,37 @@ from .models import Base
 logger = logging.getLogger(__name__)
 
 
+def _build_sqlalchemy_url(database_url: str) -> str:
+    if database_url.startswith("postgresql://"):
+        return "postgresql+psycopg://" + database_url[len("postgresql://"):]
+    if database_url.startswith("postgres://"):
+        return "postgresql+psycopg://" + database_url[len("postgres://"):]
+    return database_url
+
+
 class DatabaseSessionManager:
     """数据库会话管理器"""
 
     def __init__(self, database_url: str = None):
         if database_url is None:
-            # 优先使用 APP_DATA_DIR 环境变量（PyInstaller 打包后由 webui.py 设置）
-            data_dir = os.environ.get('APP_DATA_DIR') or os.path.join(
-                os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-                'data'
-            )
-            db_path = os.path.join(data_dir, 'database.db')
-            # 确保目录存在
-            os.makedirs(data_dir, exist_ok=True)
-            database_url = f"sqlite:///{db_path}"
+            env_url = os.environ.get("APP_DATABASE_URL") or os.environ.get("DATABASE_URL")
+            if env_url:
+                database_url = env_url
+            else:
+                # 优先使用 APP_DATA_DIR 环境变量（PyInstaller 打包后由 webui.py 设置）
+                data_dir = os.environ.get('APP_DATA_DIR') or os.path.join(
+                    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                    'data'
+                )
+                db_path = os.path.join(data_dir, 'database.db')
+                # 确保目录存在
+                os.makedirs(data_dir, exist_ok=True)
+                database_url = f"sqlite:///{db_path}"
 
-        self.database_url = database_url
+        self.database_url = _build_sqlalchemy_url(database_url)
         self.engine = create_engine(
-            database_url,
-            connect_args={"check_same_thread": False} if database_url.startswith("sqlite") else {},
+            self.database_url,
+            connect_args={"check_same_thread": False} if self.database_url.startswith("sqlite") else {},
             echo=False,  # 设置为 True 可以查看所有 SQL 语句
             pool_pre_ping=True  # 连接池预检查
         )
@@ -95,6 +107,9 @@ class DatabaseSessionManager:
             ("accounts", "cpa_uploaded", "BOOLEAN DEFAULT 0"),
             ("accounts", "cpa_uploaded_at", "DATETIME"),
             ("accounts", "source", "VARCHAR(20) DEFAULT 'register'"),
+            ("accounts", "subscription_type", "VARCHAR(20)"),
+            ("accounts", "subscription_at", "DATETIME"),
+            ("accounts", "cookies", "TEXT"),
         ]
 
         with self.engine.connect() as conn:

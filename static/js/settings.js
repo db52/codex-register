@@ -44,10 +44,15 @@ const elements = {
     // CPA 设置
     cpaForm: document.getElementById('cpa-form'),
     testCpaBtn: document.getElementById('test-cpa-btn'),
+    // Team Manager 设置
+    tmForm: document.getElementById('tm-form'),
+    testTmBtn: document.getElementById('test-tm-btn'),
     // 验证码设置
     emailCodeForm: document.getElementById('email-code-form'),
     // Outlook 设置
-    outlookSettingsForm: document.getElementById('outlook-settings-form')
+    outlookSettingsForm: document.getElementById('outlook-settings-form'),
+    // Web UI 访问控制
+    webuiSettingsForm: document.getElementById('webui-settings-form')
 };
 
 // 选中的服务 ID
@@ -231,6 +236,17 @@ function initEventListeners() {
     if (elements.outlookSettingsForm) {
         elements.outlookSettingsForm.addEventListener('submit', handleSaveOutlookSettings);
     }
+
+    if (elements.webuiSettingsForm) {
+        elements.webuiSettingsForm.addEventListener('submit', handleSaveWebuiSettings);
+    }
+    // Team Manager 设置
+    if (elements.tmForm) {
+        elements.tmForm.addEventListener('submit', handleSaveTm);
+    }
+    if (elements.testTmBtn) {
+        elements.testTmBtn.addEventListener('click', handleTestTm);
+    }
 }
 
 // 加载设置
@@ -268,10 +284,40 @@ async function loadSettings() {
         loadCpaSettings();
         // 加载 Outlook 设置
         loadOutlookSettings();
+        // 加载 Team Manager 设置
+        loadTmSettings();
+
+        // Web UI 访问密码提示
+        if (data.webui?.has_access_password) {
+            const input = document.getElementById('webui-access-password');
+            if (input) {
+                input.value = '';
+                input.placeholder = '已配置，留空保持不变';
+            }
+        }
 
     } catch (error) {
         console.error('加载设置失败:', error);
         toast.error('加载设置失败');
+    }
+}
+
+// 保存 Web UI 设置
+async function handleSaveWebuiSettings(e) {
+    e.preventDefault();
+
+    const accessPassword = document.getElementById('webui-access-password').value;
+    const payload = {
+        access_password: accessPassword || null
+    };
+
+    try {
+        await api.post('/settings/webui', payload);
+        toast.success('Web UI 设置已更新');
+        document.getElementById('webui-access-password').value = '';
+    } catch (error) {
+        console.error('保存 Web UI 设置失败:', error);
+        toast.error('保存 Web UI 设置失败');
     }
 }
 
@@ -1064,5 +1110,75 @@ async function handleTestDynamicProxy() {
     } finally {
         btn.disabled = false;
         btn.textContent = '🔌 测试动态代理';
+    }
+}
+
+// ============== Team Manager 设置 ==============
+
+async function loadTmSettings() {
+    try {
+        const data = await api.get('/settings/team-manager');
+        document.getElementById('tm-enabled').checked = data.enabled || false;
+        document.getElementById('tm-api-url').value = data.api_url || '';
+        document.getElementById('tm-api-key').value = '';
+        document.getElementById('tm-api-key').placeholder = data.has_api_key ? '已配置，留空保持不变' : '请输入 API Key';
+    } catch (error) {
+        console.error('加载 Team Manager 设置失败:', error);
+    }
+}
+
+async function handleSaveTm(e) {
+    e.preventDefault();
+    const data = {
+        enabled: document.getElementById('tm-enabled').checked,
+        api_url: document.getElementById('tm-api-url').value,
+        api_key: document.getElementById('tm-api-key').value || ''
+    };
+    try {
+        await api.post('/settings/team-manager', data);
+        toast.success('Team Manager 设置已保存');
+        loadTmSettings();
+    } catch (error) {
+        toast.error('保存失败: ' + error.message);
+    }
+}
+
+async function handleTestTm() {
+    const apiUrl = document.getElementById('tm-api-url').value;
+    const apiKey = document.getElementById('tm-api-key').value;
+
+    if (!apiUrl) {
+        toast.error('请先填写 API URL');
+        return;
+    }
+
+    let keyToTest = apiKey;
+    if (!keyToTest) {
+        const saved = await api.get('/settings/team-manager');
+        if (!saved.has_api_key) {
+            toast.error('请先填写 API Key');
+            return;
+        }
+        keyToTest = 'use_saved_key';
+    }
+
+    elements.testTmBtn.disabled = true;
+    elements.testTmBtn.innerHTML = '<span class="loading-spinner"></span> 测试中...';
+
+    try {
+        const result = await api.post('/settings/team-manager/test', {
+            api_url: apiUrl,
+            api_key: keyToTest
+        });
+        if (result.success) {
+            toast.success(result.message);
+        } else {
+            toast.error(result.message);
+        }
+    } catch (error) {
+        toast.error('测试失败: ' + error.message);
+    } finally {
+        elements.testTmBtn.disabled = false;
+        elements.testTmBtn.textContent = '🔌 测试连接';
     }
 }

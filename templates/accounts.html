@@ -57,7 +57,9 @@
                 <a href="/" class="nav-link">注册</a>
                 <a href="/accounts" class="nav-link active">账号管理</a>
                 <a href="/email-services" class="nav-link">邮箱服务</a>
+                <a href="/payment" class="nav-link">支付</a>
                 <a href="/settings" class="nav-link">设置</a>
+                <a href="/logout" class="nav-link">退出</a>
             </div>
             <button class="theme-toggle" onclick="theme.toggle()" title="切换主题">
                 🌙
@@ -126,6 +128,12 @@
                         <button class="btn btn-success" id="batch-upload-cpa-btn" disabled title="批量上传到CPA">
                             ☁️ 上传CPA
                         </button>
+                        <button class="btn btn-info" id="batch-check-sub-btn" disabled title="批量检测订阅状态">
+                            🔍 检测订阅
+                        </button>
+                        <button class="btn btn-success" id="batch-upload-tm-btn" disabled title="批量上传到Team Manager">
+                            🚀 上传TM
+                        </button>
                         <button class="btn btn-danger" id="batch-delete-btn" disabled>
                             🗑️ 批量删除
                         </button>
@@ -137,6 +145,7 @@
                                 <a href="#" class="dropdown-item" data-format="json">导出 JSON</a>
                                 <a href="#" class="dropdown-item" data-format="csv">导出 CSV</a>
                                 <a href="#" class="dropdown-item" data-format="cpa">导出 CPA 格式</a>
+                                <a href="#" class="dropdown-item" data-format="sub2api">导出 Sub2Api 格式</a>
                             </div>
                         </div>
                     </div>
@@ -157,13 +166,14 @@
                                     <th style="width: 120px;">邮箱服务</th>
                                     <th style="width: 80px;">状态</th>
                                     <th style="width: 80px;">CPA</th>
+                                    <th style="width: 80px;">订阅</th>
                                     <th style="width: 140px;">最后刷新</th>
-                                    <th style="width: 150px;">操作</th>
+                                    <th style="width: 170px;">操作</th>
                                 </tr>
                             </thead>
                             <tbody id="accounts-table">
                                 <tr>
-                                    <td colspan="9">
+                                    <td colspan="11">
                                         <div class="empty-state">
                                             <div class="skeleton skeleton-text" style="width: 60%;"></div>
                                             <div class="skeleton skeleton-text" style="width: 80%;"></div>

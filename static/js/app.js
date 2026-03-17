@@ -21,7 +21,8 @@ let toastShown = false;  // 标记是否已显示过 toast
 let availableServices = {
     tempmail: { available: true, services: [] },
     outlook: { available: false, services: [] },
-    custom_domain: { available: false, services: [] }
+    custom_domain: { available: false, services: [] },
+    temp_mail: { available: false, services: [] }
 };
 
 // WebSocket 相关变量
@@ -80,7 +81,9 @@ const elements = {
     concurrencyMode: document.getElementById('concurrency-mode'),
     concurrencyCount: document.getElementById('concurrency-count'),
     concurrencyHint: document.getElementById('concurrency-hint'),
-    intervalGroup: document.getElementById('interval-group')
+    intervalGroup: document.getElementById('interval-group'),
+    // 注册后自动操作
+    autoUploadCpa: document.getElementById('auto-upload-cpa')
 };
 
 // 初始化
@@ -91,7 +94,24 @@ document.addEventListener('DOMContentLoaded', () => {
     startAccountsPolling();
     initVisibilityReconnect();
     restoreActiveTask();
+    checkCpaEnabled();
 });
+
+// 检查 CPA 是否启用，未启用则禁用复选框
+async function checkCpaEnabled() {
+    if (!elements.autoUploadCpa) return;
+    try {
+        const data = await api.get('/settings/cpa');
+        if (!data.enabled) {
+            elements.autoUploadCpa.disabled = true;
+            elements.autoUploadCpa.title = '请先在设置中启用 CPA 上传';
+            const label = elements.autoUploadCpa.closest('label');
+            if (label) label.style.opacity = '0.5';
+        }
+    } catch (e) {
+        elements.autoUploadCpa.disabled = true;
+    }
+}
 
 // 事件监听
 function initEventListeners() {
@@ -229,6 +249,23 @@ function updateEmailServiceOptions() {
 
         select.appendChild(optgroup);
     }
+
+    // Temp-Mail（自部署）
+    if (availableServices.temp_mail && availableServices.temp_mail.available) {
+        const optgroup = document.createElement('optgroup');
+        optgroup.label = `📮 Temp-Mail 自部署 (${availableServices.temp_mail.count} 个服务)`;
+
+        availableServices.temp_mail.services.forEach(service => {
+            const option = document.createElement('option');
+            option.value = `temp_mail:${service.id}`;
+            option.textContent = service.name + (service.domain ? ` (@${service.domain})` : '');
+            option.dataset.type = 'temp_mail';
+            option.dataset.serviceId = service.id;
+            optgroup.appendChild(option);
+        });
+
+        select.appendChild(optgroup);
+    }
 }
 
 // 处理邮箱服务切换
@@ -317,7 +354,8 @@ async function handleStartRegistration(e) {
 
     // 构建请求数据（代理从设置中自动获取）
     const requestData = {
-        email_service_type: emailServiceType
+        email_service_type: emailServiceType,
+        auto_upload_cpa: elements.autoUploadCpa ? elements.autoUploadCpa.checked : false
     };
 
     // 如果选择了数据库中的服务，传递 service_id
@@ -1015,7 +1053,8 @@ async function handleOutlookBatchRegistration() {
         interval_min: intervalMin,
         interval_max: intervalMax,
         concurrency: Math.min(50, Math.max(1, concurrency)),
-        mode: mode
+        mode: mode,
+        auto_upload_cpa: elements.autoUploadCpa ? elements.autoUploadCpa.checked : false
     };
 
     addLog('info', `[系统] 正在启动 Outlook 批量注册 (${selectedIds.length} 个账户)...`);

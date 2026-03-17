@@ -4,7 +4,7 @@
 
 // 状态
 let outlookServices = [];
-let customServices = [];
+let customServices = [];  // 合并 custom_domain + temp_mail
 let selectedOutlook = new Set();
 let selectedCustom = new Set();
 
@@ -31,7 +31,7 @@ const elements = {
     selectAllOutlook: document.getElementById('select-all-outlook'),
     batchDeleteOutlookBtn: document.getElementById('batch-delete-outlook-btn'),
 
-    // 自定义域名
+    // 自定义域名（合并）
     customTable: document.getElementById('custom-services-table'),
     addCustomBtn: document.getElementById('add-custom-btn'),
     selectAllCustom: document.getElementById('select-all-custom'),
@@ -47,18 +47,25 @@ const elements = {
     addCustomForm: document.getElementById('add-custom-form'),
     closeCustomModal: document.getElementById('close-custom-modal'),
     cancelAddCustom: document.getElementById('cancel-add-custom'),
+    customSubType: document.getElementById('custom-sub-type'),
+    addMoemailFields: document.getElementById('add-moemail-fields'),
+    addTempmailFields: document.getElementById('add-tempmail-fields'),
 
     // 编辑自定义域名模态框
     editCustomModal: document.getElementById('edit-custom-modal'),
     editCustomForm: document.getElementById('edit-custom-form'),
     closeEditCustomModal: document.getElementById('close-edit-custom-modal'),
     cancelEditCustom: document.getElementById('cancel-edit-custom'),
+    editMoemailFields: document.getElementById('edit-moemail-fields'),
+    editTempmailFields: document.getElementById('edit-tempmail-fields'),
+    editCustomTypeBadge: document.getElementById('edit-custom-type-badge'),
+    editCustomSubTypeHidden: document.getElementById('edit-custom-sub-type-hidden'),
 
     // 编辑 Outlook 模态框
     editOutlookModal: document.getElementById('edit-outlook-modal'),
     editOutlookForm: document.getElementById('edit-outlook-form'),
     closeEditOutlookModal: document.getElementById('close-edit-outlook-modal'),
-    cancelEditOutlook: document.getElementById('cancel-edit-outlook')
+    cancelEditOutlook: document.getElementById('cancel-edit-outlook'),
 };
 
 // 初始化
@@ -92,11 +99,8 @@ function initEventListeners() {
         checkboxes.forEach(cb => {
             cb.checked = e.target.checked;
             const id = parseInt(cb.dataset.id);
-            if (e.target.checked) {
-                selectedOutlook.add(id);
-            } else {
-                selectedOutlook.delete(id);
-            }
+            if (e.target.checked) selectedOutlook.add(id);
+            else selectedOutlook.delete(id);
         });
         updateBatchButtons();
     });
@@ -104,60 +108,64 @@ function initEventListeners() {
     // Outlook 批量删除
     elements.batchDeleteOutlookBtn.addEventListener('click', handleBatchDeleteOutlook);
 
-    // 添加自定义域名
-    elements.addCustomBtn.addEventListener('click', () => {
-        elements.addCustomModal.classList.add('active');
-    });
-
-    elements.closeCustomModal.addEventListener('click', () => {
-        elements.addCustomModal.classList.remove('active');
-    });
-
-    elements.cancelAddCustom.addEventListener('click', () => {
-        elements.addCustomModal.classList.remove('active');
-    });
-
-    elements.addCustomForm.addEventListener('submit', handleAddCustom);
-
-    // 编辑自定义域名模态框
-    elements.closeEditCustomModal.addEventListener('click', () => {
-        elements.editCustomModal.classList.remove('active');
-    });
-
-    elements.cancelEditCustom.addEventListener('click', () => {
-        elements.editCustomModal.classList.remove('active');
-    });
-
-    elements.editCustomForm.addEventListener('submit', handleEditCustom);
-
-    // 编辑 Outlook 模态框
-    elements.closeEditOutlookModal.addEventListener('click', () => {
-        elements.editOutlookModal.classList.remove('active');
-    });
-
-    elements.cancelEditOutlook.addEventListener('click', () => {
-        elements.editOutlookModal.classList.remove('active');
-    });
-
-    elements.editOutlookForm.addEventListener('submit', handleEditOutlook);
-
     // 自定义域名全选
     elements.selectAllCustom.addEventListener('change', (e) => {
         const checkboxes = elements.customTable.querySelectorAll('input[type="checkbox"][data-id]');
         checkboxes.forEach(cb => {
             cb.checked = e.target.checked;
             const id = parseInt(cb.dataset.id);
-            if (e.target.checked) {
-                selectedCustom.add(id);
-            } else {
-                selectedCustom.delete(id);
-            }
+            if (e.target.checked) selectedCustom.add(id);
+            else selectedCustom.delete(id);
         });
     });
+
+    // 添加自定义域名
+    elements.addCustomBtn.addEventListener('click', () => {
+        elements.addCustomForm.reset();
+        switchAddSubType('moemail');
+        elements.addCustomModal.classList.add('active');
+    });
+    elements.closeCustomModal.addEventListener('click', () => elements.addCustomModal.classList.remove('active'));
+    elements.cancelAddCustom.addEventListener('click', () => elements.addCustomModal.classList.remove('active'));
+    elements.addCustomForm.addEventListener('submit', handleAddCustom);
+
+    // 类型切换（添加表单）
+    elements.customSubType.addEventListener('change', (e) => switchAddSubType(e.target.value));
+
+    // 编辑自定义域名
+    elements.closeEditCustomModal.addEventListener('click', () => elements.editCustomModal.classList.remove('active'));
+    elements.cancelEditCustom.addEventListener('click', () => elements.editCustomModal.classList.remove('active'));
+    elements.editCustomForm.addEventListener('submit', handleEditCustom);
+
+    // 编辑 Outlook
+    elements.closeEditOutlookModal.addEventListener('click', () => elements.editOutlookModal.classList.remove('active'));
+    elements.cancelEditOutlook.addEventListener('click', () => elements.editOutlookModal.classList.remove('active'));
+    elements.editOutlookForm.addEventListener('submit', handleEditOutlook);
 
     // 临时邮箱配置
     elements.tempmailForm.addEventListener('submit', handleSaveTempmail);
     elements.testTempmailBtn.addEventListener('click', handleTestTempmail);
+}
+
+// 切换添加表单子类型
+function switchAddSubType(subType) {
+    elements.customSubType.value = subType;
+    if (subType === 'moemail') {
+        elements.addMoemailFields.style.display = '';
+        elements.addTempmailFields.style.display = 'none';
+    } else {
+        elements.addMoemailFields.style.display = 'none';
+        elements.addTempmailFields.style.display = '';
+    }
+}
+
+// 切换编辑表单子类型显示
+function switchEditSubType(subType) {
+    elements.editCustomSubTypeHidden.value = subType;
+    const isMoe = subType === 'moemail';
+    elements.editMoemailFields.style.display = isMoe ? '' : 'none';
+    elements.editTempmailFields.style.display = isMoe ? 'none' : '';
+    elements.editCustomTypeBadge.textContent = isMoe ? '🔗 MoeMail（自定义域名 API）' : '📮 TempMail（自部署 Cloudflare Worker）';
 }
 
 // 加载统计信息
@@ -165,7 +173,7 @@ async function loadStats() {
     try {
         const data = await api.get('/email-services/stats');
         elements.outlookCount.textContent = data.outlook_count || 0;
-        elements.customCount.textContent = data.custom_count || 0;
+        elements.customCount.textContent = (data.custom_count || 0) + (data.temp_mail_count || 0);
         elements.tempmailStatus.textContent = data.tempmail_available ? '可用' : '不可用';
         elements.totalEnabled.textContent = data.enabled_count || 0;
     } catch (error) {
@@ -196,10 +204,7 @@ async function loadOutlookServices() {
 
         elements.outlookTable.innerHTML = outlookServices.map(service => `
             <tr data-id="${service.id}">
-                <td>
-                    <input type="checkbox" data-id="${service.id}"
-                        ${selectedOutlook.has(service.id) ? 'checked' : ''}>
-                </td>
+                <td><input type="checkbox" data-id="${service.id}" ${selectedOutlook.has(service.id) ? 'checked' : ''}></td>
                 <td>${escapeHtml(service.config?.email || service.name)}</td>
                 <td>
                     <span class="status-badge ${service.config?.has_oauth ? 'active' : 'pending'}">
@@ -215,65 +220,50 @@ async function loadOutlookServices() {
                 <td>${format.date(service.last_used)}</td>
                 <td>
                     <div class="action-buttons">
-                        <button class="btn btn-ghost btn-sm" onclick="editOutlookService(${service.id})" title="编辑">
-                            ✏️
-                        </button>
-                        <button class="btn btn-ghost btn-sm" onclick="toggleService(${service.id}, ${!service.enabled})" title="${service.enabled ? '禁用' : '启用'}">
-                            ${service.enabled ? '🔇' : '🔊'}
-                        </button>
-                        <button class="btn btn-ghost btn-sm" onclick="testService(${service.id})" title="测试">
-                            🔌
-                        </button>
-                        <button class="btn btn-ghost btn-sm" onclick="deleteService(${service.id}, '${escapeHtml(service.name)}')" title="删除">
-                            🗑️
-                        </button>
+                        <button class="btn btn-ghost btn-sm" onclick="editOutlookService(${service.id})" title="编辑">✏️</button>
+                        <button class="btn btn-ghost btn-sm" onclick="toggleService(${service.id}, ${!service.enabled})" title="${service.enabled ? '禁用' : '启用'}">${service.enabled ? '🔇' : '🔊'}</button>
+                        <button class="btn btn-ghost btn-sm" onclick="testService(${service.id})" title="测试">🔌</button>
+                        <button class="btn btn-ghost btn-sm" onclick="deleteService(${service.id}, '${escapeHtml(service.name)}')" title="删除">🗑️</button>
                     </div>
                 </td>
             </tr>
         `).join('');
 
-        // 绑定复选框事件
         elements.outlookTable.querySelectorAll('input[type="checkbox"][data-id]').forEach(cb => {
             cb.addEventListener('change', (e) => {
                 const id = parseInt(e.target.dataset.id);
-                if (e.target.checked) {
-                    selectedOutlook.add(id);
-                } else {
-                    selectedOutlook.delete(id);
-                }
+                if (e.target.checked) selectedOutlook.add(id);
+                else selectedOutlook.delete(id);
                 updateBatchButtons();
             });
         });
 
     } catch (error) {
         console.error('加载 Outlook 服务失败:', error);
-        elements.outlookTable.innerHTML = `
-            <tr>
-                <td colspan="7">
-                    <div class="empty-state">
-                        <div class="empty-state-icon">❌</div>
-                        <div class="empty-state-title">加载失败</div>
-                    </div>
-                </td>
-            </tr>
-        `;
+        elements.outlookTable.innerHTML = `<tr><td colspan="7"><div class="empty-state"><div class="empty-state-icon">❌</div><div class="empty-state-title">加载失败</div></div></td></tr>`;
     }
 }
 
-// 加载自定义域名服务
+// 加载自定义域名服务（custom_domain + temp_mail 合并）
 async function loadCustomServices() {
     try {
-        const data = await api.get('/email-services?service_type=custom_domain');
-        customServices = data.services || [];
+        const [r1, r2] = await Promise.all([
+            api.get('/email-services?service_type=custom_domain'),
+            api.get('/email-services?service_type=temp_mail')
+        ]);
+        customServices = [
+            ...(r1.services || []).map(s => ({ ...s, _subType: 'moemail' })),
+            ...(r2.services || []).map(s => ({ ...s, _subType: 'tempmail' }))
+        ];
 
         if (customServices.length === 0) {
             elements.customTable.innerHTML = `
                 <tr>
-                    <td colspan="7">
+                    <td colspan="8">
                         <div class="empty-state">
                             <div class="empty-state-icon">📭</div>
                             <div class="empty-state-title">暂无自定义域名服务</div>
-                            <div class="empty-state-description">点击"添加服务"按钮创建新服务</div>
+                            <div class="empty-state-description">点击「添加服务」按钮创建新服务</div>
                         </div>
                     </td>
                 </tr>
@@ -281,49 +271,35 @@ async function loadCustomServices() {
             return;
         }
 
-        elements.customTable.innerHTML = customServices.map(service => `
+        elements.customTable.innerHTML = customServices.map(service => {
+            const isMoe = service._subType === 'moemail';
+            const typeLabel = isMoe ? '<span class="status-badge info">MoeMail</span>' : '<span class="status-badge warning">TempMail</span>';
+            const addr = isMoe ? (service.config?.base_url || '-') : (service.config?.base_url || '-');
+            return `
             <tr data-id="${service.id}">
-                <td>
-                    <input type="checkbox" data-id="${service.id}"
-                        ${selectedCustom.has(service.id) ? 'checked' : ''}>
-                </td>
+                <td><input type="checkbox" data-id="${service.id}" ${selectedCustom.has(service.id) ? 'checked' : ''}></td>
                 <td>${escapeHtml(service.name)}</td>
-                <td style="font-size: 0.75rem;">${escapeHtml(service.config?.base_url || '-')}</td>
-                <td>
-                    <span class="status-badge ${service.enabled ? 'active' : 'disabled'}">
-                        ${service.enabled ? '启用' : '禁用'}
-                    </span>
-                </td>
+                <td>${typeLabel}</td>
+                <td style="font-size: 0.75rem;">${escapeHtml(addr)}</td>
+                <td><span class="status-badge ${service.enabled ? 'active' : 'disabled'}">${service.enabled ? '启用' : '禁用'}</span></td>
                 <td>${service.priority}</td>
                 <td>${format.date(service.last_used)}</td>
                 <td>
                     <div class="action-buttons">
-                        <button class="btn btn-ghost btn-sm" onclick="editCustomService(${service.id})" title="编辑">
-                            ✏️
-                        </button>
-                        <button class="btn btn-ghost btn-sm" onclick="toggleService(${service.id}, ${!service.enabled})" title="${service.enabled ? '禁用' : '启用'}">
-                            ${service.enabled ? '🔇' : '🔊'}
-                        </button>
-                        <button class="btn btn-ghost btn-sm" onclick="testService(${service.id})" title="测试">
-                            🔌
-                        </button>
-                        <button class="btn btn-ghost btn-sm" onclick="deleteService(${service.id}, '${escapeHtml(service.name)}')" title="删除">
-                            🗑️
-                        </button>
+                        <button class="btn btn-ghost btn-sm" onclick="editCustomService(${service.id}, '${service._subType}')" title="编辑">✏️</button>
+                        <button class="btn btn-ghost btn-sm" onclick="toggleService(${service.id}, ${!service.enabled})" title="${service.enabled ? '禁用' : '启用'}">${service.enabled ? '🔇' : '🔊'}</button>
+                        <button class="btn btn-ghost btn-sm" onclick="testService(${service.id})" title="测试">🔌</button>
+                        <button class="btn btn-ghost btn-sm" onclick="deleteService(${service.id}, '${escapeHtml(service.name)}')" title="删除">🗑️</button>
                     </div>
                 </td>
-            </tr>
-        `).join('');
+            </tr>`;
+        }).join('');
 
-        // 绑定复选框事件
         elements.customTable.querySelectorAll('input[type="checkbox"][data-id]').forEach(cb => {
             cb.addEventListener('change', (e) => {
                 const id = parseInt(e.target.dataset.id);
-                if (e.target.checked) {
-                    selectedCustom.add(id);
-                } else {
-                    selectedCustom.delete(id);
-                }
+                if (e.target.checked) selectedCustom.add(id);
+                else selectedCustom.delete(id);
             });
         });
 
@@ -348,10 +324,7 @@ async function loadTempmailConfig() {
 // Outlook 导入
 async function handleOutlookImport() {
     const data = elements.outlookImportData.value.trim();
-    if (!data) {
-        toast.error('请输入导入数据');
-        return;
-    }
+    if (!data) { toast.error('请输入导入数据'); return; }
 
     elements.outlookImportBtn.disabled = true;
     elements.outlookImportBtn.textContent = '导入中...';
@@ -366,26 +339,18 @@ async function handleOutlookImport() {
         elements.importResult.style.display = 'block';
         elements.importResult.innerHTML = `
             <div class="import-stats">
-                <span>✅ 成功导入: <strong>${result.success_count || 0}</strong></span>
-                <span>❌ 失败: <strong>${result.failed_count || 0}</strong></span>
+                <span>✅ 成功导入: <strong>${result.success || 0}</strong></span>
+                <span>❌ 失败: <strong>${result.failed || 0}</strong></span>
             </div>
-            ${result.errors?.length ? `
-                <div class="import-errors" style="margin-top: var(--spacing-sm);">
-                    <strong>错误详情：</strong>
-                    <ul>
-                        ${result.errors.map(e => `<li>${escapeHtml(e)}</li>`).join('')}
-                    </ul>
-                </div>
-            ` : ''}
+            ${result.errors?.length ? `<div class="import-errors" style="margin-top: var(--spacing-sm);"><strong>错误详情：</strong><ul>${result.errors.map(e => `<li>${escapeHtml(e)}</li>`).join('')}</ul></div>` : ''}
         `;
 
-        if (result.success_count > 0) {
-            toast.success(`成功导入 ${result.success_count} 个账户`);
+        if (result.success > 0) {
+            toast.success(`成功导入 ${result.success} 个账户`);
             loadOutlookServices();
             loadStats();
             elements.outlookImportData.value = '';
         }
-
     } catch (error) {
         toast.error('导入失败: ' + error.message);
     } finally {
@@ -394,19 +359,34 @@ async function handleOutlookImport() {
     }
 }
 
-// 添加自定义域名服务
+// 添加自定义域名服务（根据子类型区分）
 async function handleAddCustom(e) {
     e.preventDefault();
-
     const formData = new FormData(e.target);
-    const data = {
-        service_type: 'custom_domain',
-        name: formData.get('name'),
-        config: {
+    const subType = formData.get('sub_type');
+
+    let serviceType, config;
+    if (subType === 'moemail') {
+        serviceType = 'custom_domain';
+        config = {
             base_url: formData.get('api_url'),
             api_key: formData.get('api_key'),
             default_domain: formData.get('domain')
-        },
+        };
+    } else {
+        serviceType = 'temp_mail';
+        config = {
+            base_url: formData.get('tm_base_url'),
+            admin_password: formData.get('tm_admin_password'),
+            domain: formData.get('tm_domain'),
+            enable_prefix: true
+        };
+    }
+
+    const data = {
+        service_type: serviceType,
+        name: formData.get('name'),
+        config,
         enabled: formData.get('enabled') === 'on',
         priority: parseInt(formData.get('priority')) || 0
     };
@@ -440,11 +420,8 @@ async function toggleService(id, enabled) {
 async function testService(id) {
     try {
         const result = await api.post(`/email-services/${id}/test`);
-        if (result.success) {
-            toast.success('测试成功');
-        } else {
-            toast.error('测试失败: ' + (result.error || '未知错误'));
-        }
+        if (result.success) toast.success('测试成功');
+        else toast.error('测试失败: ' + (result.error || '未知错误'));
     } catch (error) {
         toast.error('测试失败: ' + error.message);
     }
@@ -454,7 +431,6 @@ async function testService(id) {
 async function deleteService(id, name) {
     const confirmed = await confirm(`确定要删除 "${name}" 吗？`);
     if (!confirmed) return;
-
     try {
         await api.delete(`/email-services/${id}`);
         toast.success('已删除');
@@ -471,10 +447,8 @@ async function deleteService(id, name) {
 // 批量删除 Outlook
 async function handleBatchDeleteOutlook() {
     if (selectedOutlook.size === 0) return;
-
     const confirmed = await confirm(`确定要删除选中的 ${selectedOutlook.size} 个账户吗？`);
     if (!confirmed) return;
-
     try {
         const result = await api.request('/email-services/outlook/batch', {
             method: 'DELETE',
@@ -492,7 +466,6 @@ async function handleBatchDeleteOutlook() {
 // 保存临时邮箱配置
 async function handleSaveTempmail(e) {
     e.preventDefault();
-
     try {
         await api.post('/settings/tempmail', {
             api_url: elements.tempmailApi.value,
@@ -508,17 +481,12 @@ async function handleSaveTempmail(e) {
 async function handleTestTempmail() {
     elements.testTempmailBtn.disabled = true;
     elements.testTempmailBtn.textContent = '测试中...';
-
     try {
         const result = await api.post('/email-services/test-tempmail', {
             api_url: elements.tempmailApi.value
         });
-
-        if (result.success) {
-            toast.success('临时邮箱连接正常');
-        } else {
-            toast.error('连接失败: ' + (result.error || '未知错误'));
-        }
+        if (result.success) toast.success('临时邮箱连接正常');
+        else toast.error('连接失败: ' + (result.error || '未知错误'));
     } catch (error) {
         toast.error('测试失败: ' + error.message);
     } finally {
@@ -544,27 +512,32 @@ function escapeHtml(text) {
 
 // ============== 编辑功能 ==============
 
-// 编辑自定义域名服务
-async function editCustomService(id) {
+// 编辑自定义域名服务（支持 moemail / tempmail）
+async function editCustomService(id, subType) {
     try {
-        // 获取完整的服务详情
         const service = await api.get(`/email-services/${id}/full`);
+        const resolvedSubType = subType || (service.service_type === 'temp_mail' ? 'tempmail' : 'moemail');
 
-        // 填充表单
         document.getElementById('edit-custom-id').value = service.id;
         document.getElementById('edit-custom-name').value = service.name || '';
-        document.getElementById('edit-custom-api-url').value = service.config?.base_url || '';
-        document.getElementById('edit-custom-api-key').value = service.config?.api_key || '';
-        document.getElementById('edit-custom-domain').value = service.config?.domain || '';
         document.getElementById('edit-custom-priority').value = service.priority || 0;
         document.getElementById('edit-custom-enabled').checked = service.enabled;
 
-        // 清空密码提示
-        document.getElementById('edit-custom-api-key').placeholder = service.config?.has_api_key ? '已设置，留空保持不变' : 'API Key';
+        switchEditSubType(resolvedSubType);
 
-        // 显示模态框
+        if (resolvedSubType === 'moemail') {
+            document.getElementById('edit-custom-api-url').value = service.config?.base_url || '';
+            document.getElementById('edit-custom-api-key').value = '';
+            document.getElementById('edit-custom-api-key').placeholder = service.config?.has_api_key ? '已设置，留空保持不变' : 'API Key';
+            document.getElementById('edit-custom-domain').value = service.config?.default_domain || service.config?.domain || '';
+        } else {
+            document.getElementById('edit-tm-base-url').value = service.config?.base_url || '';
+            document.getElementById('edit-tm-admin-password').value = '';
+            document.getElementById('edit-tm-admin-password').placeholder = service.config?.admin_password ? '已设置，留空保持不变' : '请输入 Admin 密码';
+            document.getElementById('edit-tm-domain').value = service.config?.domain || '';
+        }
+
         elements.editCustomModal.classList.add('active');
-
     } catch (error) {
         toast.error('获取服务信息失败: ' + error.message);
     }
@@ -573,30 +546,34 @@ async function editCustomService(id) {
 // 保存编辑自定义域名服务
 async function handleEditCustom(e) {
     e.preventDefault();
-
     const id = document.getElementById('edit-custom-id').value;
     const formData = new FormData(e.target);
+    const subType = formData.get('sub_type');
 
-    // 构建更新数据
+    let config;
+    if (subType === 'moemail') {
+        config = {
+            base_url: formData.get('api_url'),
+            default_domain: formData.get('domain')
+        };
+        const apiKey = formData.get('api_key');
+        if (apiKey && apiKey.trim()) config.api_key = apiKey.trim();
+    } else {
+        config = {
+            base_url: formData.get('tm_base_url'),
+            domain: formData.get('tm_domain'),
+            enable_prefix: true
+        };
+        const pwd = formData.get('tm_admin_password');
+        if (pwd && pwd.trim()) config.admin_password = pwd.trim();
+    }
+
     const updateData = {
         name: formData.get('name'),
         priority: parseInt(formData.get('priority')) || 0,
-        enabled: formData.get('enabled') === 'on'
+        enabled: formData.get('enabled') === 'on',
+        config
     };
-
-    // 构建配置
-    const config = {
-        base_url: formData.get('api_url'),
-        default_domain: formData.get('domain')
-    };
-
-    // 只有在填写了 API Key 时才更新
-    const apiKey = formData.get('api_key');
-    if (apiKey && apiKey.trim()) {
-        config.api_key = apiKey.trim();
-    }
-
-    updateData.config = config;
 
     try {
         await api.patch(`/email-services/${id}`, updateData);
@@ -612,10 +589,7 @@ async function handleEditCustom(e) {
 // 编辑 Outlook 服务
 async function editOutlookService(id) {
     try {
-        // 获取完整的服务详情
         const service = await api.get(`/email-services/${id}/full`);
-
-        // 填充表单
         document.getElementById('edit-outlook-id').value = service.id;
         document.getElementById('edit-outlook-email').value = service.config?.email || service.name || '';
         document.getElementById('edit-outlook-password').value = '';
@@ -625,10 +599,7 @@ async function editOutlookService(id) {
         document.getElementById('edit-outlook-refresh-token').placeholder = service.config?.refresh_token ? '已设置，留空保持不变' : 'OAuth Refresh Token';
         document.getElementById('edit-outlook-priority').value = service.priority || 0;
         document.getElementById('edit-outlook-enabled').checked = service.enabled;
-
-        // 显示模态框
         elements.editOutlookModal.classList.add('active');
-
     } catch (error) {
         toast.error('获取服务信息失败: ' + error.message);
     }
@@ -637,11 +608,9 @@ async function editOutlookService(id) {
 // 保存编辑 Outlook 服务
 async function handleEditOutlook(e) {
     e.preventDefault();
-
     const id = document.getElementById('edit-outlook-id').value;
     const formData = new FormData(e.target);
 
-    // 获取当前服务信息以保留未修改的敏感字段
     let currentService;
     try {
         currentService = await api.get(`/email-services/${id}/full`);
@@ -650,22 +619,17 @@ async function handleEditOutlook(e) {
         return;
     }
 
-    // 构建更新数据
     const updateData = {
-        name: formData.get('email'),  // 使用邮箱作为名称
+        name: formData.get('email'),
         priority: parseInt(formData.get('priority')) || 0,
-        enabled: formData.get('enabled') === 'on'
+        enabled: formData.get('enabled') === 'on',
+        config: {
+            email: formData.get('email'),
+            password: formData.get('password')?.trim() || currentService.config?.password || '',
+            client_id: formData.get('client_id')?.trim() || currentService.config?.client_id || '',
+            refresh_token: formData.get('refresh_token')?.trim() || currentService.config?.refresh_token || ''
+        }
     };
-
-    // 构建配置，保留未修改的敏感字段
-    const config = {
-        email: formData.get('email'),
-        password: formData.get('password')?.trim() || currentService.config?.password || '',
-        client_id: formData.get('client_id')?.trim() || currentService.config?.client_id || '',
-        refresh_token: formData.get('refresh_token')?.trim() || currentService.config?.refresh_token || ''
-    };
-
-    updateData.config = config;
 
     try {
         await api.patch(`/email-services/${id}`, updateData);

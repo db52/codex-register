@@ -9,6 +9,8 @@ let pageSize = 20;
 let totalAccounts = 0;
 let selectedAccounts = new Set();
 let isLoading = false;
+let selectAllPages = false;  // 是否选中了全部页
+let currentFilters = { status: '', email_service: '', search: '' };  // 当前筛选条件
 
 // DOM 元素
 const elements = {
@@ -24,6 +26,8 @@ const elements = {
     batchRefreshBtn: document.getElementById('batch-refresh-btn'),
     batchValidateBtn: document.getElementById('batch-validate-btn'),
     batchUploadCpaBtn: document.getElementById('batch-upload-cpa-btn'),
+    batchCheckSubBtn: document.getElementById('batch-check-sub-btn'),
+    batchUploadTmBtn: document.getElementById('batch-upload-tm-btn'),
     batchDeleteBtn: document.getElementById('batch-delete-btn'),
     exportBtn: document.getElementById('export-btn'),
     exportMenu: document.getElementById('export-menu'),
@@ -42,6 +46,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadAccounts();
     initEventListeners();
     updateBatchButtons();  // 初始化按钮状态
+    renderSelectAllBanner();
 });
 
 // 事件监听
@@ -49,17 +54,20 @@ function initEventListeners() {
     // 筛选
     elements.filterStatus.addEventListener('change', () => {
         currentPage = 1;
+        resetSelectAllPages();
         loadAccounts();
     });
 
     elements.filterService.addEventListener('change', () => {
         currentPage = 1;
+        resetSelectAllPages();
         loadAccounts();
     });
 
     // 搜索（防抖）
     elements.searchInput.addEventListener('input', debounce(() => {
         currentPage = 1;
+        resetSelectAllPages();
         loadAccounts();
     }, 300));
 
@@ -68,6 +76,7 @@ function initEventListeners() {
         if (e.key === 'Escape') {
             elements.searchInput.blur();
             elements.searchInput.value = '';
+            resetSelectAllPages();
             loadAccounts();
         }
     });
@@ -88,10 +97,16 @@ function initEventListeners() {
     // 批量上传CPA
     elements.batchUploadCpaBtn.addEventListener('click', handleBatchUploadCpa);
 
+    // 批量检测订阅
+    elements.batchCheckSubBtn.addEventListener('click', handleBatchCheckSubscription);
+
+    // 批量上传TM
+    elements.batchUploadTmBtn.addEventListener('click', handleBatchUploadTm);
+
     // 批量删除
     elements.batchDeleteBtn.addEventListener('click', handleBatchDelete);
 
-    // 全选
+    // 全选（当前页）
     elements.selectAll.addEventListener('change', (e) => {
         const checkboxes = elements.table.querySelectorAll('input[type="checkbox"][data-id]');
         checkboxes.forEach(cb => {
@@ -103,7 +118,11 @@ function initEventListeners() {
                 selectedAccounts.delete(id);
             }
         });
+        if (!e.target.checked) {
+            selectAllPages = false;
+        }
         updateBatchButtons();
+        renderSelectAllBanner();
     });
 
     // 分页
@@ -196,21 +215,26 @@ async function loadAccounts() {
         </tr>
     `;
 
+    // 记录当前筛选条件
+    currentFilters.status = elements.filterStatus.value;
+    currentFilters.email_service = elements.filterService.value;
+    currentFilters.search = elements.searchInput.value.trim();
+
     const params = new URLSearchParams({
         page: currentPage,
         page_size: pageSize,
     });
 
-    if (elements.filterStatus.value) {
-        params.append('status', elements.filterStatus.value);
+    if (currentFilters.status) {
+        params.append('status', currentFilters.status);
     }
 
-    if (elements.filterService.value) {
-        params.append('email_service', elements.filterService.value);
+    if (currentFilters.email_service) {
+        params.append('email_service', currentFilters.email_service);
     }
 
-    if (elements.searchInput.value.trim()) {
-        params.append('search', elements.searchInput.value.trim());
+    if (currentFilters.search) {
+        params.append('search', currentFilters.search);
     }
 
     try {
@@ -283,6 +307,13 @@ function renderAccounts(accounts) {
                         : `<span class="badge pending">-</span>`}
                 </div>
             </td>
+            <td>
+                <div class="cpa-status">
+                    ${account.subscription_type
+                        ? `<span class="badge uploaded" title="${account.subscription_type}">${account.subscription_type}</span>`
+                        : `<span class="badge pending">-</span>`}
+                </div>
+            </td>
             <td>${format.date(account.last_refresh) || '-'}</td>
             <td>
                 <div class="action-buttons">
@@ -291,6 +322,12 @@ function renderAccounts(accounts) {
                     </button>
                     <button class="btn btn-ghost btn-sm" onclick="uploadToCpa(${account.id})" title="上传到CPA">
                         ☁️
+                    </button>
+                    <button class="btn btn-ghost btn-sm" onclick="markSubscription(${account.id})" title="标记订阅">
+                        🏷️
+                    </button>
+                    <button class="btn btn-ghost btn-sm" onclick="uploadToTm(${account.id})" title="上传到Team Manager">
+                        🚀
                     </button>
                     <button class="btn btn-ghost btn-sm" onclick="viewAccount(${account.id})" title="查看详情">
                         👁️
@@ -315,10 +352,24 @@ function renderAccounts(accounts) {
                 selectedAccounts.add(id);
             } else {
                 selectedAccounts.delete(id);
+                selectAllPages = false;
             }
+            // 同步全选框状态
+            const allChecked = elements.table.querySelectorAll('input[type="checkbox"][data-id]');
+            const checkedCount = elements.table.querySelectorAll('input[type="checkbox"][data-id]:checked').length;
+            elements.selectAll.checked = allChecked.length > 0 && checkedCount === allChecked.length;
+            elements.selectAll.indeterminate = checkedCount > 0 && checkedCount < allChecked.length;
             updateBatchButtons();
+            renderSelectAllBanner();
         });
     });
+
+    // 渲染后同步全选框状态
+    const allCbs = elements.table.querySelectorAll('input[type="checkbox"][data-id]');
+    const checkedCbs = elements.table.querySelectorAll('input[type="checkbox"][data-id]:checked');
+    elements.selectAll.checked = allCbs.length > 0 && checkedCbs.length === allCbs.length;
+    elements.selectAll.indeterminate = checkedCbs.length > 0 && checkedCbs.length < allCbs.length;
+    renderSelectAllBanner();
 }
 
 // 切换密码显示
@@ -344,19 +395,87 @@ function updatePagination() {
     elements.pageInfo.textContent = `第 ${currentPage} 页 / 共 ${totalPages} 页`;
 }
 
+// 重置全选所有页状态
+function resetSelectAllPages() {
+    selectAllPages = false;
+    selectedAccounts.clear();
+    updateBatchButtons();
+    renderSelectAllBanner();
+}
+
+// 构建批量请求体（含 select_all 和筛选参数）
+function buildBatchPayload(extraFields = {}) {
+    if (selectAllPages) {
+        return {
+            ids: [],
+            select_all: true,
+            status_filter: currentFilters.status || null,
+            email_service_filter: currentFilters.email_service || null,
+            search_filter: currentFilters.search || null,
+            ...extraFields
+        };
+    }
+    return { ids: Array.from(selectedAccounts), ...extraFields };
+}
+
+// 获取有效选中数量（select_all 时用总数）
+function getEffectiveCount() {
+    return selectAllPages ? totalAccounts : selectedAccounts.size;
+}
+
+// 渲染全选横幅
+function renderSelectAllBanner() {
+    let banner = document.getElementById('select-all-banner');
+    const totalPages = Math.ceil(totalAccounts / pageSize);
+    const currentPageSize = elements.table.querySelectorAll('input[type="checkbox"][data-id]').length;
+    const checkedOnPage = elements.table.querySelectorAll('input[type="checkbox"][data-id]:checked').length;
+    const allPageSelected = currentPageSize > 0 && checkedOnPage === currentPageSize;
+
+    // 只在全选了当前页且有多页时显示横幅
+    if (!allPageSelected || totalPages <= 1 || totalAccounts <= pageSize) {
+        if (banner) banner.remove();
+        return;
+    }
+
+    if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'select-all-banner';
+        banner.style.cssText = 'background:var(--primary-light,#e8f0fe);color:var(--primary-color,#1a73e8);padding:8px 16px;text-align:center;font-size:0.875rem;border-bottom:1px solid var(--border-color);';
+        const tableContainer = document.querySelector('.table-container');
+        if (tableContainer) tableContainer.insertAdjacentElement('beforebegin', banner);
+    }
+
+    if (selectAllPages) {
+        banner.innerHTML = `已选中全部 <strong>${totalAccounts}</strong> 条记录。<button onclick="resetSelectAllPages()" style="margin-left:8px;color:var(--primary-color,#1a73e8);background:none;border:none;cursor:pointer;text-decoration:underline;">取消全选</button>`;
+    } else {
+        banner.innerHTML = `当前页已全选 <strong>${checkedOnPage}</strong> 条。<button onclick="selectAllPagesAction()" style="margin-left:8px;color:var(--primary-color,#1a73e8);background:none;border:none;cursor:pointer;text-decoration:underline;">选择全部 ${totalAccounts} 条</button>`;
+    }
+}
+
+// 选中所有页
+function selectAllPagesAction() {
+    selectAllPages = true;
+    updateBatchButtons();
+    renderSelectAllBanner();
+}
+
 // 更新批量操作按钮
 function updateBatchButtons() {
-    const count = selectedAccounts.size;
+    const count = getEffectiveCount();
     elements.batchDeleteBtn.disabled = count === 0;
     elements.batchRefreshBtn.disabled = count === 0;
     elements.batchValidateBtn.disabled = count === 0;
     elements.batchUploadCpaBtn.disabled = count === 0;
+    elements.batchCheckSubBtn.disabled = count === 0;
+    elements.batchUploadTmBtn.disabled = count === 0;
     elements.exportBtn.disabled = count === 0;
 
     elements.batchDeleteBtn.textContent = count > 0 ? `🗑️ 删除 (${count})` : '🗑️ 批量删除';
     elements.batchRefreshBtn.textContent = count > 0 ? `🔄 刷新 (${count})` : '🔄 刷新Token';
     elements.batchValidateBtn.textContent = count > 0 ? `✅ 验证 (${count})` : '✅ 验证Token';
     elements.batchUploadCpaBtn.textContent = count > 0 ? `☁️ 上传 (${count})` : '☁️ 上传CPA';
+    elements.batchCheckSubBtn.textContent = count > 0 ? `🔍 检测 (${count})` : '🔍 检测订阅';
+    elements.batchUploadTmBtn.textContent = count > 0 ? `🚀 上传TM (${count})` : '🚀 上传TM';
 }
 
 // 刷新单个账号Token
@@ -378,19 +497,17 @@ async function refreshToken(id) {
 
 // 批量刷新Token
 async function handleBatchRefresh() {
-    if (selectedAccounts.size === 0) return;
+    const count = getEffectiveCount();
+    if (count === 0) return;
 
-    const confirmed = await confirm(`确定要刷新选中的 ${selectedAccounts.size} 个账号的Token吗？`);
+    const confirmed = await confirm(`确定要刷新选中的 ${count} 个账号的Token吗？`);
     if (!confirmed) return;
 
     elements.batchRefreshBtn.disabled = true;
     elements.batchRefreshBtn.textContent = '刷新中...';
 
     try {
-        const result = await api.post('/accounts/batch-refresh', {
-            ids: Array.from(selectedAccounts)
-        });
-
+        const result = await api.post('/accounts/batch-refresh', buildBatchPayload());
         toast.success(`成功刷新 ${result.success_count} 个，失败 ${result.failed_count} 个`);
         loadAccounts();
     } catch (error) {
@@ -402,16 +519,13 @@ async function handleBatchRefresh() {
 
 // 批量验证Token
 async function handleBatchValidate() {
-    if (selectedAccounts.size === 0) return;
+    if (getEffectiveCount() === 0) return;
 
     elements.batchValidateBtn.disabled = true;
     elements.batchValidateBtn.textContent = '验证中...';
 
     try {
-        const result = await api.post('/accounts/batch-validate', {
-            ids: Array.from(selectedAccounts)
-        });
-
+        const result = await api.post('/accounts/batch-validate', buildBatchPayload());
         toast.info(`有效: ${result.valid_count}，无效: ${result.invalid_count}`);
         loadAccounts();
     } catch (error) {
@@ -499,6 +613,17 @@ async function viewAccount(id) {
                         ${tokens.refresh_token ? `<button class="btn btn-ghost btn-sm" onclick="copyToClipboard('${escapeHtml(tokens.refresh_token)}')" style="margin-left: 8px;">📋</button>` : ''}
                     </div>
                 </div>
+                <div class="info-item" style="grid-column: span 2;">
+                    <span class="label">Cookies（支付用）</span>
+                    <div class="value">
+                        <textarea id="cookies-input-${id}" rows="3"
+                            style="width:100%;font-size:0.7rem;font-family:var(--font-mono);background:var(--surface-hover);border:1px solid var(--border);border-radius:4px;padding:6px;color:var(--text-primary);resize:vertical;"
+                            placeholder="粘贴完整 cookie 字符串，留空则清除">${escapeHtml(account.cookies || '')}</textarea>
+                        <button class="btn btn-secondary btn-sm" style="margin-top:4px" onclick="saveCookies(${id})">
+                            保存 Cookies
+                        </button>
+                    </div>
+                </div>
             </div>
             <div style="margin-top: var(--spacing-lg); display: flex; gap: var(--spacing-sm);">
                 <button class="btn btn-primary" onclick="refreshToken(${id}); elements.detailModal.classList.remove('active');">
@@ -536,18 +661,17 @@ async function deleteAccount(id, email) {
 
 // 批量删除
 async function handleBatchDelete() {
-    if (selectedAccounts.size === 0) return;
+    const count = getEffectiveCount();
+    if (count === 0) return;
 
-    const confirmed = await confirm(`确定要删除选中的 ${selectedAccounts.size} 个账号吗？此操作不可恢复。`);
+    const confirmed = await confirm(`确定要删除选中的 ${count} 个账号吗？此操作不可恢复。`);
     if (!confirmed) return;
 
     try {
-        const result = await api.post('/accounts/batch-delete', {
-            ids: Array.from(selectedAccounts)
-        });
-
+        const result = await api.post('/accounts/batch-delete', buildBatchPayload());
         toast.success(`成功删除 ${result.deleted_count} 个账号`);
         selectedAccounts.clear();
+        selectAllPages = false;
         loadStats();
         loadAccounts();
     } catch (error) {
@@ -557,12 +681,13 @@ async function handleBatchDelete() {
 
 // 导出账号
 async function exportAccounts(format) {
-    if (selectedAccounts.size === 0) {
+    const count = getEffectiveCount();
+    if (count === 0) {
         toast.warning('请先选择要导出的账号');
         return;
     }
 
-    toast.info(`正在导出 ${selectedAccounts.size} 个账号...`);
+    toast.info(`正在导出 ${count} 个账号...`);
 
     try {
         const response = await fetch('/api/accounts/export/' + format, {
@@ -570,9 +695,7 @@ async function exportAccounts(format) {
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({
-                ids: Array.from(selectedAccounts)
-            })
+            body: JSON.stringify(buildBatchPayload())
         });
 
         if (!response.ok) {
@@ -584,7 +707,7 @@ async function exportAccounts(format) {
 
         // 从 Content-Disposition 获取文件名
         const disposition = response.headers.get('Content-Disposition');
-        let filename = `accounts_${Date.now()}.${format === 'cpa' ? 'json' : format}`;
+        let filename = `accounts_${Date.now()}.${(format === 'cpa' || format === 'sub2api') ? 'json' : format}`;
         if (disposition) {
             const match = disposition.match(/filename=(.+)/);
             if (match) {
@@ -636,18 +759,17 @@ async function uploadToCpa(id) {
 
 // 批量上传到CPA
 async function handleBatchUploadCpa() {
-    if (selectedAccounts.size === 0) return;
+    const count = getEffectiveCount();
+    if (count === 0) return;
 
-    const confirmed = await confirm(`确定要将选中的 ${selectedAccounts.size} 个账号上传到CPA吗？`);
+    const confirmed = await confirm(`确定要将选中的 ${count} 个账号上传到CPA吗？`);
     if (!confirmed) return;
 
     elements.batchUploadCpaBtn.disabled = true;
     elements.batchUploadCpaBtn.textContent = '上传中...';
 
     try {
-        const result = await api.post('/accounts/batch-upload-cpa', {
-            ids: Array.from(selectedAccounts)
-        });
+        const result = await api.post('/accounts/batch-upload-cpa', buildBatchPayload());
 
         let message = `成功: ${result.success_count}`;
         if (result.failed_count > 0) {
@@ -663,5 +785,103 @@ async function handleBatchUploadCpa() {
         toast.error('批量上传失败: ' + error.message);
     } finally {
         updateBatchButtons();
+    }
+}
+
+// ============== 订阅状态 ==============
+
+// 手动标记订阅类型
+async function markSubscription(id) {
+    const type = prompt('请输入订阅类型 (plus / team / free):', 'plus');
+    if (!type) return;
+    if (!['plus', 'team', 'free'].includes(type.trim().toLowerCase())) {
+        toast.error('无效的订阅类型，请输入 plus、team 或 free');
+        return;
+    }
+    try {
+        await api.post(`/payment/accounts/${id}/mark-subscription`, {
+            subscription_type: type.trim().toLowerCase()
+        });
+        toast.success('订阅状态已更新');
+        loadAccounts();
+    } catch (e) {
+        toast.error('标记失败: ' + e.message);
+    }
+}
+
+// 批量检测订阅状态
+async function handleBatchCheckSubscription() {
+    const count = getEffectiveCount();
+    if (count === 0) return;
+    const confirmed = await confirm(`确定要检测选中的 ${count} 个账号的订阅状态吗？`);
+    if (!confirmed) return;
+
+    elements.batchCheckSubBtn.disabled = true;
+    elements.batchCheckSubBtn.textContent = '检测中...';
+
+    try {
+        const result = await api.post('/payment/accounts/batch-check-subscription', buildBatchPayload());
+        let message = `成功: ${result.success_count}`;
+        if (result.failed_count > 0) message += `, 失败: ${result.failed_count}`;
+        toast.success(message);
+        loadAccounts();
+    } catch (e) {
+        toast.error('批量检测失败: ' + e.message);
+    } finally {
+        updateBatchButtons();
+    }
+}
+
+// ============== Team Manager 上传 ==============
+
+// 上传单账号到 Team Manager
+async function uploadToTm(id) {
+    try {
+        toast.info('正在上传到 Team Manager...');
+        const result = await api.post(`/payment/accounts/${id}/upload-tm`);
+        if (result.success) {
+            toast.success('上传成功');
+        } else {
+            toast.error('上传失败: ' + (result.message || '未知错误'));
+        }
+    } catch (e) {
+        toast.error('上传失败: ' + e.message);
+    }
+}
+
+// 批量上传到 Team Manager
+async function handleBatchUploadTm() {
+    const count = getEffectiveCount();
+    if (count === 0) return;
+    const confirmed = await confirm(`确定要将选中的 ${count} 个账号上传到 Team Manager 吗？`);
+    if (!confirmed) return;
+
+    elements.batchUploadTmBtn.disabled = true;
+    elements.batchUploadTmBtn.textContent = '上传中...';
+
+    try {
+        const result = await api.post('/payment/accounts/batch-upload-tm', buildBatchPayload());
+        let message = `成功: ${result.success_count}`;
+        if (result.failed_count > 0) message += `, 失败: ${result.failed_count}`;
+        if (result.skipped_count > 0) message += `, 跳过: ${result.skipped_count}`;
+        toast.success(message);
+        loadAccounts();
+    } catch (e) {
+        toast.error('批量上传失败: ' + e.message);
+    } finally {
+        updateBatchButtons();
+    }
+}
+
+// 保存账号 Cookies
+async function saveCookies(id) {
+    const textarea = document.getElementById(`cookies-input-${id}`);
+    if (!textarea) return;
+    const cookiesValue = textarea.value.trim();
+    try {
+        await api.patch(`/accounts/${id}`, { cookies: cookiesValue });
+        toast.success('Cookies 已保存');
+    } catch (e) {
+        toast.error('保存 Cookies 失败: ' + e.message);
     }
 }

@@ -52,9 +52,10 @@ class RegistrationSettings(BaseModel):
 
 class WebUISettings(BaseModel):
     """Web UI 设置"""
-    host: str = "0.0.0.0"
-    port: int = 8000
-    debug: bool = False
+    host: Optional[str] = None
+    port: Optional[int] = None
+    debug: Optional[bool] = None
+    access_password: Optional[str] = None
 
 
 class AllSettings(BaseModel):
@@ -96,6 +97,7 @@ async def get_all_settings():
             "host": settings.webui_host,
             "port": settings.webui_port,
             "debug": settings.debug,
+            "has_access_password": bool(settings.webui_access_password and settings.webui_access_password.get_secret_value()),
         },
         "tempmail": {
             "base_url": settings.tempmail_base_url,
@@ -315,6 +317,23 @@ async def update_registration_settings(request: RegistrationSettings):
     )
 
     return {"success": True, "message": "注册设置已更新"}
+
+
+@router.post("/webui")
+async def update_webui_settings(request: WebUISettings):
+    """更新 Web UI 设置"""
+    update_dict = {}
+    if request.host is not None:
+        update_dict["webui_host"] = request.host
+    if request.port is not None:
+        update_dict["webui_port"] = request.port
+    if request.debug is not None:
+        update_dict["debug"] = request.debug
+    if request.access_password:
+        update_dict["webui_access_password"] = request.access_password
+
+    update_settings(**update_dict)
+    return {"success": True, "message": "Web UI 设置已更新"}
 
 
 @router.get("/database")
@@ -858,3 +877,59 @@ async def update_outlook_settings(request: OutlookSettings):
         update_settings(**update_dict)
 
     return {"success": True, "message": "Outlook 设置已更新"}
+
+
+# ============== Team Manager 设置 ==============
+
+class TeamManagerSettings(BaseModel):
+    """Team Manager 设置"""
+    enabled: bool = False
+    api_url: str = ""
+    api_key: str = ""
+
+
+class TeamManagerTestRequest(BaseModel):
+    """Team Manager 测试请求"""
+    api_url: str
+    api_key: str
+
+
+@router.get("/team-manager")
+async def get_team_manager_settings():
+    """获取 Team Manager 设置"""
+    settings = get_settings()
+    return {
+        "enabled": settings.tm_enabled,
+        "api_url": settings.tm_api_url,
+        "has_api_key": bool(settings.tm_api_key and settings.tm_api_key.get_secret_value()),
+    }
+
+
+@router.post("/team-manager")
+async def update_team_manager_settings(request: TeamManagerSettings):
+    """更新 Team Manager 设置"""
+    update_dict = {
+        "tm_enabled": request.enabled,
+        "tm_api_url": request.api_url,
+    }
+    if request.api_key:
+        update_dict["tm_api_key"] = request.api_key
+    update_settings(**update_dict)
+    return {"success": True, "message": "Team Manager 设置已更新"}
+
+
+@router.post("/team-manager/test")
+async def test_team_manager_connection(request: TeamManagerTestRequest):
+    """测试 Team Manager 连接"""
+    from ...core.team_manager import test_team_manager_connection as do_test
+
+    settings = get_settings()
+    api_key = request.api_key
+    if api_key == 'use_saved_key' or not api_key:
+        if settings.tm_api_key:
+            api_key = settings.tm_api_key.get_secret_value()
+        else:
+            return {"success": False, "message": "未配置 API Key"}
+
+    success, message = do_test(request.api_url, api_key)
+    return {"success": success, "message": message}

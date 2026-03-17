@@ -53,6 +53,9 @@ class Account(Base):
     cpa_uploaded = Column(Boolean, default=False)  # 是否已上传到 CPA
     cpa_uploaded_at = Column(DateTime)  # 上传时间
     source = Column(String(20), default='register')  # 'register' 或 'login'，区分账号来源
+    subscription_type = Column(String(20))  # None / 'plus' / 'team'
+    subscription_at = Column(DateTime)  # 订阅开通时间
+    cookies = Column(Text)  # 完整 cookie 字符串，用于支付请求
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -74,6 +77,8 @@ class Account(Base):
             'cpa_uploaded': self.cpa_uploaded,
             'cpa_uploaded_at': self.cpa_uploaded_at.isoformat() if self.cpa_uploaded_at else None,
             'source': self.source,
+            'subscription_type': self.subscription_type,
+            'subscription_at': self.subscription_at.isoformat() if self.subscription_at else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }

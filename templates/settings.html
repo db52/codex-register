@@ -18,7 +18,9 @@
                 <a href="/" class="nav-link">注册</a>
                 <a href="/accounts" class="nav-link">账号管理</a>
                 <a href="/email-services" class="nav-link">邮箱服务</a>
+                <a href="/payment" class="nav-link">支付</a>
                 <a href="/settings" class="nav-link active">设置</a>
+                <a href="/logout" class="nav-link">退出</a>
             </div>
             <button class="theme-toggle" onclick="theme.toggle()" title="切换主题">
                 🌙
@@ -35,7 +37,9 @@
             <!-- 设置标签页 -->
             <div class="tabs">
                 <button class="tab-btn active" data-tab="proxy">🌐 代理设置</button>
+                <button class="tab-btn" data-tab="webui">🔒 访问控制</button>
                 <button class="tab-btn" data-tab="cpa">☁️ CPA上传</button>
+                <button class="tab-btn" data-tab="team-manager">🚀 Team Manager</button>
                 <button class="tab-btn" data-tab="outlook">📮 Outlook配置</button>
                 <button class="tab-btn" data-tab="registration">⚙️ 注册配置</button>
                 <button class="tab-btn" data-tab="email-code">📧 验证码配置</button>
@@ -181,6 +185,27 @@
                 </div>
             </div>
 
+            <!-- 访问控制 -->
+            <div class="tab-content" id="webui-tab">
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Web UI 访问密码</h3>
+                        <span class="hint">用于访问页面的密码，留空表示不修改</span>
+                    </div>
+                    <div class="card-body">
+                        <form id="webui-settings-form">
+                            <div class="form-group">
+                                <label for="webui-access-password">访问密码</label>
+                                <input type="password" id="webui-access-password" name="access_password" placeholder="留空保持不变" autocomplete="new-password">
+                            </div>
+                            <div class="form-actions">
+                                <button type="submit" class="btn btn-primary">💾 保存设置</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
             <!-- 添加代理模态框 -->
             <div class="modal" id="add-proxy-modal">
                 <div class="modal-content">
@@ -263,6 +288,44 @@
                             <div class="form-actions">
                                 <button type="submit" class="btn btn-primary">💾 保存设置</button>
                                 <button type="button" class="btn btn-secondary" id="test-cpa-btn">🔌 测试连接</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Team Manager 设置 -->
+            <div class="tab-content" id="team-manager-tab">
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Team Manager 配置</h3>
+                        <span class="hint">配置 Team Manager 账号导入功能</span>
+                    </div>
+                    <div class="card-body">
+                        <form id="tm-form">
+                            <div class="form-group">
+                                <label>
+                                    <input type="checkbox" id="tm-enabled" name="enabled">
+                                    启用 Team Manager 上传
+                                </label>
+                                <p class="hint">启用后可在账号管理页面将账号导入 Team Manager 平台</p>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="tm-api-url">API URL</label>
+                                <input type="text" id="tm-api-url" name="api_url" placeholder="例如: https://tm.example.com">
+                                <p class="hint">Team Manager 平台的 API 地址</p>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="tm-api-key">API Key</label>
+                                <input type="password" id="tm-api-key" name="api_key" placeholder="留空则保持原值" autocomplete="new-password">
+                                <p class="hint">Team Manager 平台的认证 Key</p>
+                            </div>
+
+                            <div class="form-actions">
+                                <button type="submit" class="btn btn-primary">💾 保存设置</button>
+                                <button type="button" class="btn btn-secondary" id="test-tm-btn">🔌 测试连接</button>
                             </div>
                         </form>
                     </div>

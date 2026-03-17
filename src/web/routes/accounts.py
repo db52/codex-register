@@ -39,6 +39,7 @@ class AccountResponse(BaseModel):
     proxy_used: Optional[str] = None
     cpa_uploaded: bool = False
     cpa_uploaded_at: Optional[str] = None
+    cookies: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
@@ -56,11 +57,16 @@ class AccountUpdateRequest(BaseModel):
     """账号更新请求"""
     status: Optional[str] = None
     metadata: Optional[dict] = None
+    cookies: Optional[str] = None  # 完整 cookie 字符串，用于支付请求
 
 
 class BatchDeleteRequest(BaseModel):
     """批量删除请求"""
-    ids: List[int]
+    ids: List[int] = []
+    select_all: bool = False
+    status_filter: Optional[str] = None
+    email_service_filter: Optional[str] = None
+    search_filter: Optional[str] = None
 
 
 class BatchUpdateRequest(BaseModel):
@@ -70,6 +76,30 @@ class BatchUpdateRequest(BaseModel):
 
 
 # ============== Helper Functions ==============
+
+def resolve_account_ids(
+    db,
+    ids: List[int],
+    select_all: bool = False,
+    status_filter: Optional[str] = None,
+    email_service_filter: Optional[str] = None,
+    search_filter: Optional[str] = None,
+) -> List[int]:
+    """当 select_all=True 时查询全部符合条件的 ID，否则直接返回传入的 ids"""
+    if not select_all:
+        return ids
+    query = db.query(Account.id)
+    if status_filter:
+        query = query.filter(Account.status == status_filter)
+    if email_service_filter:
+        query = query.filter(Account.email_service == email_service_filter)
+    if search_filter:
+        pattern = f"%{search_filter}%"
+        query = query.filter(
+            (Account.email.ilike(pattern)) | (Account.account_id.ilike(pattern))
+        )
+    return [row[0] for row in query.all()]
+
 
 def account_to_response(account: Account) -> AccountResponse:
     """转换 Account 模型为响应模型"""
@@ -88,6 +118,7 @@ def account_to_response(account: Account) -> AccountResponse:
         proxy_used=account.proxy_used,
         cpa_uploaded=account.cpa_uploaded or False,
         cpa_uploaded_at=account.cpa_uploaded_at.isoformat() if account.cpa_uploaded_at else None,
+        cookies=account.cookies,
         created_at=account.created_at.isoformat() if account.created_at else None,
         updated_at=account.updated_at.isoformat() if account.updated_at else None,
     )
@@ -162,9 +193,9 @@ async def get_account_tokens(account_id: int):
         return {
             "id": account.id,
             "email": account.email,
-            "access_token": account.access_token[:50] + "..." if account.access_token else None,
-            "refresh_token": account.refresh_token[:50] + "..." if account.refresh_token else None,
-            "id_token": account.id_token[:50] + "..." if account.id_token else None,
+            "access_token": account.access_token,
+            "refresh_token": account.refresh_token,
+            "id_token": account.id_token,
             "has_tokens": bool(account.access_token and account.refresh_token),
         }
 
@@ -188,8 +219,22 @@ async def update_account(account_id: int, request: AccountUpdateRequest):
             current_metadata.update(request.metadata)
             update_data["metadata"] = current_metadata
 
+        if request.cookies is not None:
+            # 留空则清空，非空则更新
+            update_data["cookies"] = request.cookies or None
+
         account = crud.update_account(db, account_id, **update_data)
         return account_to_response(account)
+
+
+@router.get("/{account_id}/cookies")
+async def get_account_cookies(account_id: int):
+    """获取账号的 cookie 字符串（仅供支付使用）"""
+    with get_db() as db:
+        account = crud.get_account_by_id(db, account_id)
+        if not account:
+            raise HTTPException(status_code=404, detail="账号不存在")
+        return {"account_id": account_id, "cookies": account.cookies or ""}
 
 
 @router.delete("/{account_id}")
@@ -208,10 +253,14 @@ async def delete_account(account_id: int):
 async def batch_delete_accounts(request: BatchDeleteRequest):
     """批量删除账号"""
     with get_db() as db:
+        ids = resolve_account_ids(
+            db, request.ids, request.select_all,
+            request.status_filter, request.email_service_filter, request.search_filter
+        )
         deleted_count = 0
         errors = []
 
-        for account_id in request.ids:
+        for account_id in ids:
             try:
                 account = crud.get_account_by_id(db, account_id)
                 if account:
@@ -255,14 +304,22 @@ async def batch_update_accounts(request: BatchUpdateRequest):
 
 class BatchExportRequest(BaseModel):
     """批量导出请求"""
-    ids: List[int]
+    ids: List[int] = []
+    select_all: bool = False
+    status_filter: Optional[str] = None
+    email_service_filter: Optional[str] = None
+    search_filter: Optional[str] = None
 
 
 @router.post("/export/json")
 async def export_accounts_json(request: BatchExportRequest):
     """导出账号为 JSON 格式"""
     with get_db() as db:
-        accounts = db.query(Account).filter(Account.id.in_(request.ids)).all()
+        ids = resolve_account_ids(
+            db, request.ids, request.select_all,
+            request.status_filter, request.email_service_filter, request.search_filter
+        )
+        accounts = db.query(Account).filter(Account.id.in_(ids)).all()
 
         export_data = []
         for acc in accounts:
@@ -304,7 +361,11 @@ async def export_accounts_csv(request: BatchExportRequest):
     import io
 
     with get_db() as db:
-        accounts = db.query(Account).filter(Account.id.in_(request.ids)).all()
+        ids = resolve_account_ids(
+            db, request.ids, request.select_all,
+            request.status_filter, request.email_service_filter, request.search_filter
+        )
+        accounts = db.query(Account).filter(Account.id.in_(ids)).all()
 
         # 创建 CSV 内容
         output = io.StringIO()
@@ -349,6 +410,82 @@ async def export_accounts_csv(request: BatchExportRequest):
         )
 
 
+@router.post("/export/sub2api")
+async def export_accounts_sub2api(request: BatchExportRequest):
+    """导出账号为 Sub2Api 格式（每个账号单独一个 JSON 文件，多个打包为 ZIP）"""
+    import io
+    import zipfile
+
+    def make_sub2api_json(acc) -> dict:
+        expires_at = int(acc.expires_at.timestamp()) if acc.expires_at else 0
+        return {
+            "proxies": [],
+            "accounts": [
+                {
+                    "name": acc.email,
+                    "platform": "openai",
+                    "type": "oauth",
+                    "credentials": {
+                        "access_token": acc.access_token or "",
+                        "chatgpt_account_id": acc.account_id or "",
+                        "chatgpt_user_id": "",
+                        "client_id": acc.client_id or "",
+                        "expires_at": expires_at,
+                        "expires_in": 863999,
+                        "model_mapping": {
+                            "gpt-5.1": "gpt-5.1",
+                            "gpt-5.1-codex": "gpt-5.1-codex",
+                            "gpt-5.1-codex-max": "gpt-5.1-codex-max",
+                            "gpt-5.1-codex-mini": "gpt-5.1-codex-mini",
+                            "gpt-5.2": "gpt-5.2",
+                            "gpt-5.2-codex": "gpt-5.2-codex"
+                        },
+                        "organization_id": acc.workspace_id or "",
+                        "refresh_token": acc.refresh_token or ""
+                    },
+                    "extra": {},
+                    "concurrency": 10,
+                    "priority": 1,
+                    "rate_multiplier": 1,
+                    "auto_pause_on_expired": True
+                }
+            ]
+        }
+
+    with get_db() as db:
+        ids = resolve_account_ids(
+            db, request.ids, request.select_all,
+            request.status_filter, request.email_service_filter, request.search_filter
+        )
+        accounts = db.query(Account).filter(Account.id.in_(ids)).all()
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        if len(accounts) == 1:
+            acc = accounts[0]
+            content = json.dumps(make_sub2api_json(acc), ensure_ascii=False, indent=2)
+            filename = f"{acc.email}_sub2api.json"
+            return StreamingResponse(
+                iter([content]),
+                media_type="application/json",
+                headers={"Content-Disposition": f"attachment; filename={filename}"}
+            )
+
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+            for acc in accounts:
+                content = json.dumps(make_sub2api_json(acc), ensure_ascii=False, indent=2)
+                zf.writestr(f"{acc.email}_sub2api.json", content)
+
+        zip_buffer.seek(0)
+        zip_filename = f"sub2api_tokens_{timestamp}.zip"
+        return StreamingResponse(
+            zip_buffer,
+            media_type="application/zip",
+            headers={"Content-Disposition": f"attachment; filename={zip_filename}"}
+        )
+
+
 @router.post("/export/cpa")
 async def export_accounts_cpa(request: BatchExportRequest):
     """导出账号为 CPA Token JSON 格式（每个账号单独一个 JSON 文件，打包为 ZIP）"""
@@ -357,7 +494,11 @@ async def export_accounts_cpa(request: BatchExportRequest):
     from ...core.cpa_upload import generate_token_json
 
     with get_db() as db:
-        accounts = db.query(Account).filter(Account.id.in_(request.ids)).all()
+        ids = resolve_account_ids(
+            db, request.ids, request.select_all,
+            request.status_filter, request.email_service_filter, request.search_filter
+        )
+        accounts = db.query(Account).filter(Account.id.in_(ids)).all()
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -427,8 +568,12 @@ class TokenRefreshRequest(BaseModel):
 
 class BatchRefreshRequest(BaseModel):
     """批量刷新请求"""
-    ids: List[int]
+    ids: List[int] = []
     proxy: Optional[str] = None
+    select_all: bool = False
+    status_filter: Optional[str] = None
+    email_service_filter: Optional[str] = None
+    search_filter: Optional[str] = None
 
 
 class TokenValidateRequest(BaseModel):
@@ -438,8 +583,12 @@ class TokenValidateRequest(BaseModel):
 
 class BatchValidateRequest(BaseModel):
     """批量验证请求"""
-    ids: List[int]
+    ids: List[int] = []
     proxy: Optional[str] = None
+    select_all: bool = False
+    status_filter: Optional[str] = None
+    email_service_filter: Optional[str] = None
+    search_filter: Optional[str] = None
 
 
 @router.post("/{account_id}/refresh")
@@ -478,7 +627,13 @@ async def batch_refresh_tokens(request: BatchRefreshRequest, background_tasks: B
         "errors": []
     }
 
-    for account_id in request.ids:
+    with get_db() as db:
+        ids = resolve_account_ids(
+            db, request.ids, request.select_all,
+            request.status_filter, request.email_service_filter, request.search_filter
+        )
+
+    for account_id in ids:
         try:
             result = do_refresh(account_id, proxy)
             if result.success:
@@ -523,7 +678,13 @@ async def batch_validate_tokens(request: BatchValidateRequest):
         "details": []
     }
 
-    for account_id in request.ids:
+    with get_db() as db:
+        ids = resolve_account_ids(
+            db, request.ids, request.select_all,
+            request.status_filter, request.email_service_filter, request.search_filter
+        )
+
+    for account_id in ids:
         try:
             is_valid, error = do_validate(account_id, proxy)
             results["details"].append({
@@ -555,8 +716,12 @@ class CPAUploadRequest(BaseModel):
 
 class BatchCPAUploadRequest(BaseModel):
     """批量 CPA 上传请求"""
-    ids: List[int]
+    ids: List[int] = []
     proxy: Optional[str] = None
+    select_all: bool = False
+    status_filter: Optional[str] = None
+    email_service_filter: Optional[str] = None
+    search_filter: Optional[str] = None
 
 
 @router.post("/{account_id}/upload-cpa")
@@ -609,6 +774,12 @@ async def batch_upload_accounts_to_cpa(request: BatchCPAUploadRequest):
     # 使用传入的代理或全局代理配置
     proxy = request.proxy if request.proxy else get_settings().proxy_url
 
-    results = batch_upload_to_cpa(request.ids, proxy)
+    with get_db() as db:
+        ids = resolve_account_ids(
+            db, request.ids, request.select_all,
+            request.status_filter, request.email_service_filter, request.search_filter
+        )
+
+    results = batch_upload_to_cpa(ids, proxy)
 
     return results

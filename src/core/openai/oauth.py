@@ -14,7 +14,7 @@ from typing import Any, Dict, Optional
 
 from curl_cffi import requests as cffi_requests
 
-from ..config.constants import (
+from ...config.constants import (
     OAUTH_CLIENT_ID,
     OAUTH_AUTH_URL,
     OAUTH_TOKEN_URL,

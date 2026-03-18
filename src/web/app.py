@@ -5,14 +5,17 @@ FastAPI 应用主文件
 
 import logging
 import sys
-from pathlib import Path
+import secrets
+import hmac
+import hashlib
 from typing import Optional
+from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Form
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from ..config.settings import get_settings
 from .routes import api_router
@@ -78,30 +81,92 @@ def create_app() -> FastAPI:
     # 模板引擎
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
+    def _auth_token(password: str) -> str:
+        secret = get_settings().webui_secret_key.get_secret_value().encode("utf-8")
+        return hmac.new(secret, password.encode("utf-8"), hashlib.sha256).hexdigest()
+
+    def _is_authenticated(request: Request) -> bool:
+        cookie = request.cookies.get("webui_auth")
+        expected = _auth_token(get_settings().webui_access_password.get_secret_value())
+        return bool(cookie) and secrets.compare_digest(cookie, expected)
+
+    def _redirect_to_login(request: Request) -> RedirectResponse:
+        return RedirectResponse(url=f"/login?next={request.url.path}", status_code=302)
+
+    @app.get("/login", response_class=HTMLResponse)
+    async def login_page(request: Request, next: Optional[str] = "/"):
+        """登录页面"""
+        return templates.TemplateResponse(
+            "login.html",
+            {"request": request, "error": "", "next": next or "/"}
+        )
+
+    @app.post("/login")
+    async def login_submit(request: Request, password: str = Form(...), next: Optional[str] = "/"):
+        """处理登录提交"""
+        expected = get_settings().webui_access_password.get_secret_value()
+        if not secrets.compare_digest(password, expected):
+            return templates.TemplateResponse(
+                "login.html",
+                {"request": request, "error": "密码错误", "next": next or "/"},
+                status_code=401
+            )
+
+        response = RedirectResponse(url=next or "/", status_code=302)
+        response.set_cookie("webui_auth", _auth_token(expected), httponly=True, samesite="lax")
+        return response
+
+    @app.get("/logout")
+    async def logout(request: Request, next: Optional[str] = "/login"):
+        """退出登录"""
+        response = RedirectResponse(url=next or "/login", status_code=302)
+        response.delete_cookie("webui_auth")
+        return response
+
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request):
         """首页 - 注册页面"""
+        if not _is_authenticated(request):
+            return _redirect_to_login(request)
         return templates.TemplateResponse("index.html", {"request": request})
 
     @app.get("/accounts", response_class=HTMLResponse)
     async def accounts_page(request: Request):
         """账号管理页面"""
+        if not _is_authenticated(request):
+            return _redirect_to_login(request)
         return templates.TemplateResponse("accounts.html", {"request": request})
 
     @app.get("/email-services", response_class=HTMLResponse)
     async def email_services_page(request: Request):
         """邮箱服务管理页面"""
+        if not _is_authenticated(request):
+            return _redirect_to_login(request)
         return templates.TemplateResponse("email_services.html", {"request": request})
 
     @app.get("/settings", response_class=HTMLResponse)
     async def settings_page(request: Request):
         """设置页面"""
+        if not _is_authenticated(request):
+            return _redirect_to_login(request)
         return templates.TemplateResponse("settings.html", {"request": request})
+
+    @app.get("/payment", response_class=HTMLResponse)
+    async def payment_page(request: Request):
+        """支付页面"""
+        return templates.TemplateResponse("payment.html", {"request": request})
 
     @app.on_event("startup")
     async def startup_event():
         """应用启动事件"""
         import asyncio
+        from ..database.init_db import initialize_database
+
+        # 确保数据库已初始化（reload 模式下子进程也需要初始化）
+        try:
+            initialize_database()
+        except Exception as e:
+            logger.warning(f"数据库初始化: {e}")
 
         # 设置 TaskManager 的事件循环
         loop = asyncio.get_event_loop()

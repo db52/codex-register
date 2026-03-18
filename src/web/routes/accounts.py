@@ -39,6 +39,7 @@ class AccountResponse(BaseModel):
     proxy_used: Optional[str] = None
     cpa_uploaded: bool = False
     cpa_uploaded_at: Optional[str] = None
+    cookies: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
@@ -56,11 +57,16 @@ class AccountUpdateRequest(BaseModel):
     """账号更新请求"""
     status: Optional[str] = None
     metadata: Optional[dict] = None
+    cookies: Optional[str] = None  # 完整 cookie 字符串，用于支付请求
 
 
 class BatchDeleteRequest(BaseModel):
     """批量删除请求"""
-    ids: List[int]
+    ids: List[int] = []
+    select_all: bool = False
+    status_filter: Optional[str] = None
+    email_service_filter: Optional[str] = None
+    search_filter: Optional[str] = None
 
 
 class BatchUpdateRequest(BaseModel):
@@ -70,6 +76,30 @@ class BatchUpdateRequest(BaseModel):
 
 
 # ============== Helper Functions ==============
+
+def resolve_account_ids(
+    db,
+    ids: List[int],
+    select_all: bool = False,
+    status_filter: Optional[str] = None,
+    email_service_filter: Optional[str] = None,
+    search_filter: Optional[str] = None,
+) -> List[int]:
+    """当 select_all=True 时查询全部符合条件的 ID，否则直接返回传入的 ids"""
+    if not select_all:
+        return ids
+    query = db.query(Account.id)
+    if status_filter:
+        query = query.filter(Account.status == status_filter)
+    if email_service_filter:
+        query = query.filter(Account.email_service == email_service_filter)
+    if search_filter:
+        pattern = f"%{search_filter}%"
+        query = query.filter(
+            (Account.email.ilike(pattern)) | (Account.account_id.ilike(pattern))
+        )
+    return [row[0] for row in query.all()]
+
 
 def account_to_response(account: Account) -> AccountResponse:
     """转换 Account 模型为响应模型"""
@@ -88,6 +118,7 @@ def account_to_response(account: Account) -> AccountResponse:
         proxy_used=account.proxy_used,
         cpa_uploaded=account.cpa_uploaded or False,
         cpa_uploaded_at=account.cpa_uploaded_at.isoformat() if account.cpa_uploaded_at else None,
+        cookies=account.cookies,
         created_at=account.created_at.isoformat() if account.created_at else None,
         updated_at=account.updated_at.isoformat() if account.updated_at else None,
     )
@@ -162,9 +193,9 @@ async def get_account_tokens(account_id: int):
         return {
             "id": account.id,
             "email": account.email,
-            "access_token": account.access_token[:50] + "..." if account.access_token else None,
-            "refresh_token": account.refresh_token[:50] + "..." if account.refresh_token else None,
-            "id_token": account.id_token[:50] + "..." if account.id_token else None,
+            "access_token": account.access_token,
+            "refresh_token": account.refresh_token,
+            "id_token": account.id_token,
             "has_tokens": bool(account.access_token and account.refresh_token),
         }
 
@@ -188,8 +219,22 @@ async def update_account(account_id: int, request: AccountUpdateRequest):
             current_metadata.update(request.metadata)
             update_data["metadata"] = current_metadata
 
+        if request.cookies is not None:
+            # 留空则清空，非空则更新
+            update_data["cookies"] = request.cookies or None
+
         account = crud.update_account(db, account_id, **update_data)
         return account_to_response(account)
+
+
+@router.get("/{account_id}/cookies")
+async def get_account_cookies(account_id: int):
+    """获取账号的 cookie 字符串（仅供支付使用）"""
+    with get_db() as db:
+        account = crud.get_account_by_id(db, account_id)
+        if not account:
+            raise HTTPException(status_code=404, detail="账号不存在")
+        return {"account_id": account_id, "cookies": account.cookies or ""}
 
 
 @router.delete("/{account_id}")
@@ -208,10 +253,14 @@ async def delete_account(account_id: int):
 async def batch_delete_accounts(request: BatchDeleteRequest):
     """批量删除账号"""
     with get_db() as db:
+        ids = resolve_account_ids(
+            db, request.ids, request.select_all,
+            request.status_filter, request.email_service_filter, request.search_filter
+        )
         deleted_count = 0
         errors = []
 
-        for account_id in request.ids:
+        for account_id in ids:
             try:
                 account = crud.get_account_by_id(db, account_id)
                 if account:
@@ -255,14 +304,22 @@ async def batch_update_accounts(request: BatchUpdateRequest):
 
 class BatchExportRequest(BaseModel):
     """批量导出请求"""
-    ids: List[int]
+    ids: List[int] = []
+    select_all: bool = False
+    status_filter: Optional[str] = None
+    email_service_filter: Optional[str] = None
+    search_filter: Optional[str] = None
 
 
 @router.post("/export/json")
 async def export_accounts_json(request: BatchExportRequest):
     """导出账号为 JSON 格式"""
     with get_db() as db:
-        accounts = db.query(Account).filter(Account.id.in_(request.ids)).all()
+        ids = resolve_account_ids(
+            db, request.ids, request.select_all,
+            request.status_filter, request.email_service_filter, request.search_filter
+        )
+        accounts = db.query(Account).filter(Account.id.in_(ids)).all()
 
         export_data = []
         for acc in accounts:
@@ -304,7 +361,11 @@ async def export_accounts_csv(request: BatchExportRequest):
     import io
 
     with get_db() as db:
-        accounts = db.query(Account).filter(Account.id.in_(request.ids)).all()
+        ids = resolve_account_ids(
+            db, request.ids, request.select_all,
+            request.status_filter, request.email_service_filter, request.search_filter
+        )
+        accounts = db.query(Account).filter(Account.id.in_(ids)).all()
 
         # 创建 CSV 内容
         output = io.StringIO()
@@ -349,15 +410,83 @@ async def export_accounts_csv(request: BatchExportRequest):
         )
 
 
+@router.post("/export/sub2api")
+async def export_accounts_sub2api(request: BatchExportRequest):
+    """导出账号为 Sub2Api 格式（所有选中账号合并到一个 JSON 的 accounts 数组中）"""
+
+    def make_account_entry(acc) -> dict:
+        expires_at = int(acc.expires_at.timestamp()) if acc.expires_at else 0
+        return {
+            "name": acc.email,
+            "platform": "openai",
+            "type": "oauth",
+            "credentials": {
+                "access_token": acc.access_token or "",
+                "chatgpt_account_id": acc.account_id or "",
+                "chatgpt_user_id": "",
+                "client_id": acc.client_id or "",
+                "expires_at": expires_at,
+                "expires_in": 863999,
+                "model_mapping": {
+                    "gpt-5.1": "gpt-5.1",
+                    "gpt-5.1-codex": "gpt-5.1-codex",
+                    "gpt-5.1-codex-max": "gpt-5.1-codex-max",
+                    "gpt-5.1-codex-mini": "gpt-5.1-codex-mini",
+                    "gpt-5.2": "gpt-5.2",
+                    "gpt-5.2-codex": "gpt-5.2-codex",
+                    "gpt-5.3": "gpt-5.3",
+                    "gpt-5.3-codex": "gpt-5.3-codex",
+                    "gpt-5.4": "gpt-5.4"
+                },
+                "organization_id": acc.workspace_id or "",
+                "refresh_token": acc.refresh_token or ""
+            },
+            "extra": {},
+            "concurrency": 10,
+            "priority": 1,
+            "rate_multiplier": 1,
+            "auto_pause_on_expired": True
+        }
+
+    with get_db() as db:
+        ids = resolve_account_ids(
+            db, request.ids, request.select_all,
+            request.status_filter, request.email_service_filter, request.search_filter
+        )
+        accounts = db.query(Account).filter(Account.id.in_(ids)).all()
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        payload = {
+            "proxies": [],
+            "accounts": [make_account_entry(acc) for acc in accounts]
+        }
+        content = json.dumps(payload, ensure_ascii=False, indent=2)
+
+        if len(accounts) == 1:
+            filename = f"{accounts[0].email}_sub2api.json"
+        else:
+            filename = f"sub2api_tokens_{timestamp}.json"
+
+        return StreamingResponse(
+            iter([content]),
+            media_type="application/json",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+
+
 @router.post("/export/cpa")
 async def export_accounts_cpa(request: BatchExportRequest):
     """导出账号为 CPA Token JSON 格式（每个账号单独一个 JSON 文件，打包为 ZIP）"""
     import io
     import zipfile
-    from ...core.cpa_upload import generate_token_json
+    from ...core.upload.cpa_upload import generate_token_json
 
     with get_db() as db:
-        accounts = db.query(Account).filter(Account.id.in_(request.ids)).all()
+        ids = resolve_account_ids(
+            db, request.ids, request.select_all,
+            request.status_filter, request.email_service_filter, request.search_filter
+        )
+        accounts = db.query(Account).filter(Account.id.in_(ids)).all()
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -427,8 +556,12 @@ class TokenRefreshRequest(BaseModel):
 
 class BatchRefreshRequest(BaseModel):
     """批量刷新请求"""
-    ids: List[int]
+    ids: List[int] = []
     proxy: Optional[str] = None
+    select_all: bool = False
+    status_filter: Optional[str] = None
+    email_service_filter: Optional[str] = None
+    search_filter: Optional[str] = None
 
 
 class TokenValidateRequest(BaseModel):
@@ -438,14 +571,18 @@ class TokenValidateRequest(BaseModel):
 
 class BatchValidateRequest(BaseModel):
     """批量验证请求"""
-    ids: List[int]
+    ids: List[int] = []
     proxy: Optional[str] = None
+    select_all: bool = False
+    status_filter: Optional[str] = None
+    email_service_filter: Optional[str] = None
+    search_filter: Optional[str] = None
 
 
 @router.post("/{account_id}/refresh")
 async def refresh_account_token(account_id: int, request: TokenRefreshRequest = None):
     """刷新单个账号的 Token"""
-    from ...core.token_refresh import refresh_account_token as do_refresh
+    from ...core.openai.token_refresh import refresh_account_token as do_refresh
 
     # 使用传入的代理或全局代理配置
     proxy = request.proxy if request and request.proxy else get_settings().proxy_url
@@ -467,7 +604,7 @@ async def refresh_account_token(account_id: int, request: TokenRefreshRequest = 
 @router.post("/batch-refresh")
 async def batch_refresh_tokens(request: BatchRefreshRequest, background_tasks: BackgroundTasks):
     """批量刷新账号 Token"""
-    from ...core.token_refresh import refresh_account_token as do_refresh
+    from ...core.openai.token_refresh import refresh_account_token as do_refresh
 
     # 使用传入的代理或全局代理配置
     proxy = request.proxy if request.proxy else get_settings().proxy_url
@@ -478,7 +615,13 @@ async def batch_refresh_tokens(request: BatchRefreshRequest, background_tasks: B
         "errors": []
     }
 
-    for account_id in request.ids:
+    with get_db() as db:
+        ids = resolve_account_ids(
+            db, request.ids, request.select_all,
+            request.status_filter, request.email_service_filter, request.search_filter
+        )
+
+    for account_id in ids:
         try:
             result = do_refresh(account_id, proxy)
             if result.success:
@@ -496,7 +639,7 @@ async def batch_refresh_tokens(request: BatchRefreshRequest, background_tasks: B
 @router.post("/{account_id}/validate")
 async def validate_account_token(account_id: int, request: TokenValidateRequest = None):
     """验证单个账号的 Token 有效性"""
-    from ...core.token_refresh import validate_account_token as do_validate
+    from ...core.openai.token_refresh import validate_account_token as do_validate
 
     # 使用传入的代理或全局代理配置
     proxy = request.proxy if request and request.proxy else get_settings().proxy_url
@@ -512,7 +655,7 @@ async def validate_account_token(account_id: int, request: TokenValidateRequest 
 @router.post("/batch-validate")
 async def batch_validate_tokens(request: BatchValidateRequest):
     """批量验证账号 Token 有效性"""
-    from ...core.token_refresh import validate_account_token as do_validate
+    from ...core.openai.token_refresh import validate_account_token as do_validate
 
     # 使用传入的代理或全局代理配置
     proxy = request.proxy if request.proxy else get_settings().proxy_url
@@ -523,7 +666,13 @@ async def batch_validate_tokens(request: BatchValidateRequest):
         "details": []
     }
 
-    for account_id in request.ids:
+    with get_db() as db:
+        ids = resolve_account_ids(
+            db, request.ids, request.select_all,
+            request.status_filter, request.email_service_filter, request.search_filter
+        )
+
+    for account_id in ids:
         try:
             is_valid, error = do_validate(account_id, proxy)
             results["details"].append({
@@ -551,21 +700,38 @@ async def batch_validate_tokens(request: BatchValidateRequest):
 class CPAUploadRequest(BaseModel):
     """CPA 上传请求"""
     proxy: Optional[str] = None
+    cpa_service_id: Optional[int] = None  # 指定 CPA 服务 ID，不传则使用全局配置
 
 
 class BatchCPAUploadRequest(BaseModel):
     """批量 CPA 上传请求"""
-    ids: List[int]
+    ids: List[int] = []
     proxy: Optional[str] = None
+    select_all: bool = False
+    status_filter: Optional[str] = None
+    email_service_filter: Optional[str] = None
+    search_filter: Optional[str] = None
+    cpa_service_id: Optional[int] = None  # 指定 CPA 服务 ID，不传则使用全局配置
 
 
 @router.post("/{account_id}/upload-cpa")
 async def upload_account_to_cpa(account_id: int, request: CPAUploadRequest = None):
     """上传单个账号到 CPA"""
-    from ...core.cpa_upload import upload_to_cpa, generate_token_json
+    from ...core.upload.cpa_upload import upload_to_cpa, generate_token_json
 
-    # 使用传入的代理或全局代理配置
     proxy = request.proxy if request and request.proxy else get_settings().proxy_url
+    cpa_service_id = request.cpa_service_id if request else None
+
+    # 解析指定的 CPA 服务
+    cpa_api_url = None
+    cpa_api_token = None
+    if cpa_service_id:
+        with get_db() as db:
+            svc = crud.get_cpa_service_by_id(db, cpa_service_id)
+            if not svc:
+                raise HTTPException(status_code=404, detail="指定的 CPA 服务不存在")
+            cpa_api_url = svc.api_url
+            cpa_api_token = svc.api_token
 
     with get_db() as db:
         account = crud.get_account_by_id(db, account_id)
@@ -582,33 +748,143 @@ async def upload_account_to_cpa(account_id: int, request: CPAUploadRequest = Non
         token_data = generate_token_json(account)
 
         # 上传
-        success, message = upload_to_cpa(token_data, proxy)
+        success, message = upload_to_cpa(token_data, proxy, api_url=cpa_api_url, api_token=cpa_api_token)
 
         if success:
-            # 更新数据库状态
             account.cpa_uploaded = True
             account.cpa_uploaded_at = datetime.utcnow()
             db.commit()
-
-            return {
-                "success": True,
-                "message": message
-            }
+            return {"success": True, "message": message}
         else:
-            return {
-                "success": False,
-                "error": message
-            }
+            return {"success": False, "error": message}
 
 
 @router.post("/batch-upload-cpa")
 async def batch_upload_accounts_to_cpa(request: BatchCPAUploadRequest):
     """批量上传账号到 CPA"""
-    from ...core.cpa_upload import batch_upload_to_cpa
+    from ...core.upload.cpa_upload import batch_upload_to_cpa
 
-    # 使用传入的代理或全局代理配置
     proxy = request.proxy if request.proxy else get_settings().proxy_url
 
-    results = batch_upload_to_cpa(request.ids, proxy)
+    # 解析指定的 CPA 服务
+    cpa_api_url = None
+    cpa_api_token = None
+    if request.cpa_service_id:
+        with get_db() as db:
+            svc = crud.get_cpa_service_by_id(db, request.cpa_service_id)
+            if not svc:
+                raise HTTPException(status_code=404, detail="指定的 CPA 服务不存在")
+            cpa_api_url = svc.api_url
+            cpa_api_token = svc.api_token
 
+    with get_db() as db:
+        ids = resolve_account_ids(
+            db, request.ids, request.select_all,
+            request.status_filter, request.email_service_filter, request.search_filter
+        )
+
+    results = batch_upload_to_cpa(ids, proxy, api_url=cpa_api_url, api_token=cpa_api_token)
+    return results
+
+
+class Sub2ApiUploadRequest(BaseModel):
+    """单账号 Sub2API 上传请求"""
+    service_id: Optional[int] = None
+    concurrency: int = 3
+    priority: int = 50
+
+
+@router.post("/{account_id}/upload-sub2api")
+async def upload_account_to_sub2api(account_id: int, request: Sub2ApiUploadRequest = None):
+    """上传单个账号到 Sub2API"""
+    from ...core.upload.sub2api_upload import upload_to_sub2api
+
+    service_id = request.service_id if request else None
+    concurrency = request.concurrency if request else 3
+    priority = request.priority if request else 50
+
+    api_url = None
+    api_key = None
+    if service_id:
+        with get_db() as db:
+            svc = crud.get_sub2api_service_by_id(db, service_id)
+            if not svc:
+                raise HTTPException(status_code=404, detail="指定的 Sub2API 服务不存在")
+            api_url = svc.api_url
+            api_key = svc.api_key
+    else:
+        with get_db() as db:
+            svcs = crud.get_sub2api_services(db, enabled=True)
+            if svcs:
+                api_url = svcs[0].api_url
+                api_key = svcs[0].api_key
+
+    if not api_url or not api_key:
+        raise HTTPException(status_code=400, detail="未找到可用的 Sub2API 服务，请先在设置中配置")
+
+    with get_db() as db:
+        account = crud.get_account_by_id(db, account_id)
+        if not account:
+            raise HTTPException(status_code=404, detail="账号不存在")
+        if not account.access_token:
+            return {"success": False, "error": "账号缺少 Token，无法上传"}
+
+        success, message = upload_to_sub2api(
+            [account], api_url, api_key,
+            concurrency=concurrency, priority=priority
+        )
+        if success:
+            return {"success": True, "message": message}
+        else:
+            return {"success": False, "error": message}
+
+
+class BatchSub2ApiUploadRequest(BaseModel):
+    """批量 Sub2API 上传请求"""
+    ids: List[int] = []
+    select_all: bool = False
+    status_filter: Optional[str] = None
+    email_service_filter: Optional[str] = None
+    search_filter: Optional[str] = None
+    service_id: Optional[int] = None  # 指定 Sub2API 服务 ID，不传则使用第一个启用的
+    concurrency: int = 3
+    priority: int = 50
+
+
+@router.post("/batch-upload-sub2api")
+async def batch_upload_accounts_to_sub2api(request: BatchSub2ApiUploadRequest):
+    """批量上传账号到 Sub2API"""
+    from ...core.upload.sub2api_upload import batch_upload_to_sub2api
+
+    # 解析指定的 Sub2API 服务
+    api_url = None
+    api_key = None
+    if request.service_id:
+        with get_db() as db:
+            svc = crud.get_sub2api_service_by_id(db, request.service_id)
+            if not svc:
+                raise HTTPException(status_code=404, detail="指定的 Sub2API 服务不存在")
+            api_url = svc.api_url
+            api_key = svc.api_key
+    else:
+        with get_db() as db:
+            svcs = crud.get_sub2api_services(db, enabled=True)
+            if svcs:
+                api_url = svcs[0].api_url
+                api_key = svcs[0].api_key
+
+    if not api_url or not api_key:
+        raise HTTPException(status_code=400, detail="未找到可用的 Sub2API 服务，请先在设置中配置")
+
+    with get_db() as db:
+        ids = resolve_account_ids(
+            db, request.ids, request.select_all,
+            request.status_filter, request.email_service_filter, request.search_filter
+        )
+
+    results = batch_upload_to_sub2api(
+        ids, api_url, api_key,
+        concurrency=request.concurrency,
+        priority=request.priority,
+    )
     return results

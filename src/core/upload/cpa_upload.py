@@ -10,9 +10,9 @@ from datetime import datetime
 from curl_cffi import requests as cffi_requests
 from curl_cffi import CurlMime
 
-from ..database.session import get_db
-from ..database.models import Account
-from ..config.settings import get_settings
+from ...database.session import get_db
+from ...database.models import Account
+from ...config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -39,33 +39,48 @@ def generate_token_json(account: Account) -> dict:
     }
 
 
-def upload_to_cpa(token_data: dict, proxy: str = None) -> Tuple[bool, str]:
+def upload_to_cpa(
+    token_data: dict,
+    proxy: str = None,
+    api_url: str = None,
+    api_token: str = None,
+) -> Tuple[bool, str]:
     """
     上传单个账号到 CPA 管理平台（不走代理）
 
     Args:
         token_data: Token JSON 数据
         proxy: 保留参数，不使用（CPA 上传始终直连）
+        api_url: 指定 CPA API URL（优先于全局配置）
+        api_token: 指定 CPA API Token（优先于全局配置）
 
     Returns:
         (成功标志, 消息或错误信息)
     """
     settings = get_settings()
 
-    if not settings.cpa_enabled:
+    # 优先使用传入的参数，否则退回全局配置
+    effective_url = api_url or settings.cpa_api_url
+    effective_token = api_token or (settings.cpa_api_token.get_secret_value() if settings.cpa_api_token else "")
+
+    # 仅当未指定服务时才检查全局启用开关
+    if not api_url and not settings.cpa_enabled:
         return False, "CPA 上传未启用"
 
-    if not settings.cpa_api_url:
+    if not effective_url:
         return False, "CPA API URL 未配置"
 
-    api_url = settings.cpa_api_url.rstrip("/")
+    if not effective_token:
+        return False, "CPA API Token 未配置"
+
+    api_url = effective_url.rstrip("/")
     upload_url = f"{api_url}/v0/management/auth-files"
 
     filename = f"{token_data['email']}.json"
     file_content = json.dumps(token_data, ensure_ascii=False, indent=2).encode("utf-8")
 
     headers = {
-        "Authorization": f"Bearer {settings.cpa_api_token.get_secret_value()}",
+        "Authorization": f"Bearer {effective_token}",
     }
 
     try:
@@ -103,13 +118,20 @@ def upload_to_cpa(token_data: dict, proxy: str = None) -> Tuple[bool, str]:
         return False, f"上传异常: {str(e)}"
 
 
-def batch_upload_to_cpa(account_ids: List[int], proxy: str = None) -> dict:
+def batch_upload_to_cpa(
+    account_ids: List[int],
+    proxy: str = None,
+    api_url: str = None,
+    api_token: str = None,
+) -> dict:
     """
     批量上传账号到 CPA 管理平台
 
     Args:
         account_ids: 账号 ID 列表
         proxy: 可选的代理 URL
+        api_url: 指定 CPA API URL（优先于全局配置）
+        api_token: 指定 CPA API Token（优先于全局配置）
 
     Returns:
         包含成功/失败统计和详情的字典
@@ -150,7 +172,7 @@ def batch_upload_to_cpa(account_ids: List[int], proxy: str = None) -> dict:
             token_data = generate_token_json(account)
 
             # 上传
-            success, message = upload_to_cpa(token_data, proxy)
+            success, message = upload_to_cpa(token_data, proxy, api_url=api_url, api_token=api_token)
 
             if success:
                 # 更新数据库状态

@@ -53,6 +53,9 @@ class Account(Base):
     cpa_uploaded = Column(Boolean, default=False)  # 是否已上传到 CPA
     cpa_uploaded_at = Column(DateTime)  # 上传时间
     source = Column(String(20), default='register')  # 'register' 或 'login'，区分账号来源
+    subscription_type = Column(String(20))  # None / 'plus' / 'team'
+    subscription_at = Column(DateTime)  # 订阅开通时间
+    cookies = Column(Text)  # 完整 cookie 字符串，用于支付请求
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -74,6 +77,8 @@ class Account(Base):
             'cpa_uploaded': self.cpa_uploaded,
             'cpa_uploaded_at': self.cpa_uploaded_at.isoformat() if self.cpa_uploaded_at else None,
             'source': self.source,
+            'subscription_type': self.subscription_type,
+            'subscription_at': self.subscription_at.isoformat() if self.subscription_at else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
@@ -125,6 +130,48 @@ class Setting(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class CpaService(Base):
+    """CPA 服务配置表"""
+    __tablename__ = 'cpa_services'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False)  # 服务名称
+    api_url = Column(String(500), nullable=False)  # API URL
+    api_token = Column(Text, nullable=False)  # API Token
+    enabled = Column(Boolean, default=True)
+    priority = Column(Integer, default=0)  # 优先级
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class Sub2ApiService(Base):
+    """Sub2API 服务配置表"""
+    __tablename__ = 'sub2api_services'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False)  # 服务名称
+    api_url = Column(String(500), nullable=False)  # API URL (host)
+    api_key = Column(Text, nullable=False)  # x-api-key
+    enabled = Column(Boolean, default=True)
+    priority = Column(Integer, default=0)  # 优先级
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class TeamManagerService(Base):
+    """Team Manager 服务配置表"""
+    __tablename__ = 'tm_services'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False)  # 服务名称
+    api_url = Column(String(500), nullable=False)  # API URL
+    api_key = Column(Text, nullable=False)  # X-API-Key
+    enabled = Column(Boolean, default=True)
+    priority = Column(Integer, default=0)  # 优先级
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class Proxy(Base):
     """代理列表表"""
     __tablename__ = 'proxies'
@@ -137,6 +184,7 @@ class Proxy(Base):
     username = Column(String(100))
     password = Column(String(255))
     enabled = Column(Boolean, default=True)
+    is_default = Column(Boolean, default=False)  # 是否为默认代理
     priority = Column(Integer, default=0)  # 优先级（保留字段）
     last_used = Column(DateTime)  # 最后使用时间
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -152,6 +200,7 @@ class Proxy(Base):
             'port': self.port,
             'username': self.username,
             'enabled': self.enabled,
+            'is_default': self.is_default or False,
             'priority': self.priority,
             'last_used': self.last_used.isoformat() if self.last_used else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,

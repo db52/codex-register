@@ -21,7 +21,8 @@ let toastShown = false;  // 标记是否已显示过 toast
 let availableServices = {
     tempmail: { available: true, services: [] },
     outlook: { available: false, services: [] },
-    custom_domain: { available: false, services: [] }
+    custom_domain: { available: false, services: [] },
+    temp_mail: { available: false, services: [] }
 };
 
 // WebSocket 相关变量
@@ -80,7 +81,17 @@ const elements = {
     concurrencyMode: document.getElementById('concurrency-mode'),
     concurrencyCount: document.getElementById('concurrency-count'),
     concurrencyHint: document.getElementById('concurrency-hint'),
-    intervalGroup: document.getElementById('interval-group')
+    intervalGroup: document.getElementById('interval-group'),
+    // 注册后自动操作
+    autoUploadCpa: document.getElementById('auto-upload-cpa'),
+    cpaServiceSelectGroup: document.getElementById('cpa-service-select-group'),
+    cpaServiceSelect: document.getElementById('cpa-service-select'),
+    autoUploadSub2api: document.getElementById('auto-upload-sub2api'),
+    sub2apiServiceSelectGroup: document.getElementById('sub2api-service-select-group'),
+    sub2apiServiceSelect: document.getElementById('sub2api-service-select'),
+    autoUploadTm: document.getElementById('auto-upload-tm'),
+    tmServiceSelectGroup: document.getElementById('tm-service-select-group'),
+    tmServiceSelect: document.getElementById('tm-service-select'),
 };
 
 // 初始化
@@ -91,7 +102,86 @@ document.addEventListener('DOMContentLoaded', () => {
     startAccountsPolling();
     initVisibilityReconnect();
     restoreActiveTask();
+    initAutoUploadOptions();
 });
+
+// 初始化注册后自动操作选项（CPA / Sub2API / TM）
+async function initAutoUploadOptions() {
+    await Promise.all([
+        loadServiceSelect('/cpa-services?enabled=true', elements.cpaServiceSelect, elements.autoUploadCpa, elements.cpaServiceSelectGroup),
+        loadServiceSelect('/sub2api-services?enabled=true', elements.sub2apiServiceSelect, elements.autoUploadSub2api, elements.sub2apiServiceSelectGroup),
+        loadServiceSelect('/tm-services?enabled=true', elements.tmServiceSelect, elements.autoUploadTm, elements.tmServiceSelectGroup),
+    ]);
+}
+
+// 通用：构建自定义多选下拉组件并处理联动
+async function loadServiceSelect(apiPath, container, checkbox, selectGroup) {
+    if (!checkbox || !container) return;
+    let services = [];
+    try {
+        services = await api.get(apiPath);
+    } catch (e) {}
+
+    if (!services || services.length === 0) {
+        checkbox.disabled = true;
+        checkbox.title = '请先在设置中添加对应服务';
+        const label = checkbox.closest('label');
+        if (label) label.style.opacity = '0.5';
+        container.innerHTML = '<div class="msd-empty">暂无可用服务</div>';
+    } else {
+        const items = services.map(s =>
+            `<label class="msd-item">
+                <input type="checkbox" value="${s.id}" checked>
+                <span>${escapeHtml(s.name)}</span>
+            </label>`
+        ).join('');
+        container.innerHTML = `
+            <div class="msd-dropdown" id="${container.id}-dd">
+                <div class="msd-trigger" onclick="toggleMsd('${container.id}-dd')">
+                    <span class="msd-label">全部 (${services.length})</span>
+                    <span class="msd-arrow">▼</span>
+                </div>
+                <div class="msd-list">${items}</div>
+            </div>`;
+        // 监听 checkbox 变化，更新触发器文字
+        container.querySelectorAll('.msd-item input').forEach(cb => {
+            cb.addEventListener('change', () => updateMsdLabel(container.id + '-dd'));
+        });
+        // 点击外部关闭
+        document.addEventListener('click', (e) => {
+            const dd = document.getElementById(container.id + '-dd');
+            if (dd && !dd.contains(e.target)) dd.classList.remove('open');
+        }, true);
+    }
+
+    // 联动显示/隐藏服务选择区
+    checkbox.addEventListener('change', () => {
+        if (selectGroup) selectGroup.style.display = checkbox.checked ? 'block' : 'none';
+    });
+}
+
+function toggleMsd(ddId) {
+    const dd = document.getElementById(ddId);
+    if (dd) dd.classList.toggle('open');
+}
+
+function updateMsdLabel(ddId) {
+    const dd = document.getElementById(ddId);
+    if (!dd) return;
+    const all = dd.querySelectorAll('.msd-item input');
+    const checked = dd.querySelectorAll('.msd-item input:checked');
+    const label = dd.querySelector('.msd-label');
+    if (!label) return;
+    if (checked.length === 0) label.textContent = '未选择';
+    else if (checked.length === all.length) label.textContent = `全部 (${all.length})`;
+    else label.textContent = Array.from(checked).map(c => c.nextElementSibling.textContent).join(', ');
+}
+
+// 获取自定义多选下拉中选中的服务 ID 列表
+function getSelectedServiceIds(container) {
+    if (!container) return [];
+    return Array.from(container.querySelectorAll('.msd-item input:checked')).map(cb => parseInt(cb.value));
+}
 
 // 事件监听
 function initEventListeners() {
@@ -229,6 +319,23 @@ function updateEmailServiceOptions() {
 
         select.appendChild(optgroup);
     }
+
+    // Temp-Mail（自部署）
+    if (availableServices.temp_mail && availableServices.temp_mail.available) {
+        const optgroup = document.createElement('optgroup');
+        optgroup.label = `📮 Temp-Mail 自部署 (${availableServices.temp_mail.count} 个服务)`;
+
+        availableServices.temp_mail.services.forEach(service => {
+            const option = document.createElement('option');
+            option.value = `temp_mail:${service.id}`;
+            option.textContent = service.name + (service.domain ? ` (@${service.domain})` : '');
+            option.dataset.type = 'temp_mail';
+            option.dataset.serviceId = service.id;
+            optgroup.appendChild(option);
+        });
+
+        select.appendChild(optgroup);
+    }
 }
 
 // 处理邮箱服务切换
@@ -317,7 +424,13 @@ async function handleStartRegistration(e) {
 
     // 构建请求数据（代理从设置中自动获取）
     const requestData = {
-        email_service_type: emailServiceType
+        email_service_type: emailServiceType,
+        auto_upload_cpa: elements.autoUploadCpa ? elements.autoUploadCpa.checked : false,
+        cpa_service_ids: elements.autoUploadCpa && elements.autoUploadCpa.checked ? getSelectedServiceIds(elements.cpaServiceSelect) : [],
+        auto_upload_sub2api: elements.autoUploadSub2api ? elements.autoUploadSub2api.checked : false,
+        sub2api_service_ids: elements.autoUploadSub2api && elements.autoUploadSub2api.checked ? getSelectedServiceIds(elements.sub2apiServiceSelect) : [],
+        auto_upload_tm: elements.autoUploadTm ? elements.autoUploadTm.checked : false,
+        tm_service_ids: elements.autoUploadTm && elements.autoUploadTm.checked ? getSelectedServiceIds(elements.tmServiceSelect) : [],
     };
 
     // 如果选择了数据库中的服务，传递 service_id
@@ -785,26 +898,32 @@ async function loadRecentAccounts() {
             <tr data-id="${account.id}">
                 <td>${account.id}</td>
                 <td>
-                    <span title="${escapeHtml(account.email)}">${escapeHtml(account.email)}</span>
-                </td>
-                <td class="password-cell">
-                    ${account.password ? `<span class="password-hidden" title="点击查看">${escapeHtml(account.password.substring(0, 8))}...</span>` : '-'}
-                </td>
-                <td>
-                    <span class="status-badge ${getStatusClass('account', account.status)}" style="font-size: 0.7rem;">
-                        ${getStatusText('account', account.status)}
+                    <span style="display:inline-flex;align-items:center;gap:4px;">
+                        <span title="${escapeHtml(account.email)}">${escapeHtml(account.email)}</span>
+                        <button class="btn-copy-icon copy-email-btn" data-email="${escapeHtml(account.email)}" title="复制邮箱">📋</button>
                     </span>
                 </td>
+                <td class="password-cell">
+                    ${account.password
+                        ? `<span style="display:inline-flex;align-items:center;gap:4px;">
+                            <span class="password-hidden" title="点击查看">${escapeHtml(account.password.substring(0, 8))}...</span>
+                            <button class="btn-copy-icon copy-pwd-btn" data-pwd="${escapeHtml(account.password)}" title="复制密码">📋</button>
+                           </span>`
+                        : '-'}
+                </td>
                 <td>
-                    <div class="action-buttons">
-                        <button class="btn btn-ghost btn-sm" onclick="copyToClipboard('${escapeHtml(account.email)}')" title="复制邮箱">
-                            📋
-                        </button>
-                        ${account.password ? `<button class="btn btn-ghost btn-sm" onclick="copyToClipboard('${escapeHtml(account.password)}')" title="复制密码">🔑</button>` : ''}
-                    </div>
+                    ${getStatusIcon(account.status)}
                 </td>
             </tr>
         `).join('');
+
+        // 绑定复制按钮事件
+        elements.recentAccountsTable.querySelectorAll('.copy-email-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => { e.stopPropagation(); copyToClipboard(btn.dataset.email); });
+        });
+        elements.recentAccountsTable.querySelectorAll('.copy-pwd-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => { e.stopPropagation(); copyToClipboard(btn.dataset.pwd); });
+        });
 
     } catch (error) {
         console.error('加载账号列表失败:', error);
@@ -1015,7 +1134,13 @@ async function handleOutlookBatchRegistration() {
         interval_min: intervalMin,
         interval_max: intervalMax,
         concurrency: Math.min(50, Math.max(1, concurrency)),
-        mode: mode
+        mode: mode,
+        auto_upload_cpa: elements.autoUploadCpa ? elements.autoUploadCpa.checked : false,
+        cpa_service_ids: elements.autoUploadCpa && elements.autoUploadCpa.checked ? getSelectedServiceIds(elements.cpaServiceSelect) : [],
+        auto_upload_sub2api: elements.autoUploadSub2api ? elements.autoUploadSub2api.checked : false,
+        sub2api_service_ids: elements.autoUploadSub2api && elements.autoUploadSub2api.checked ? getSelectedServiceIds(elements.sub2apiServiceSelect) : [],
+        auto_upload_tm: elements.autoUploadTm ? elements.autoUploadTm.checked : false,
+        tm_service_ids: elements.autoUploadTm && elements.autoUploadTm.checked ? getSelectedServiceIds(elements.tmServiceSelect) : [],
     };
 
     addLog('info', `[系统] 正在启动 Outlook 批量注册 (${selectedIds.length} 个账户)...`);

@@ -393,6 +393,10 @@ def get_data_dir() -> Path:
         数据目录 Path 对象
     """
     settings = get_settings()
+    if not settings.database_url.startswith("sqlite"):
+        data_dir = Path(os.environ.get("APP_DATA_DIR", "data"))
+        data_dir.mkdir(parents=True, exist_ok=True)
+        return data_dir
     data_dir = Path(settings.database_url).parent
 
     # 如果 database_url 是 SQLite URL，提取路径

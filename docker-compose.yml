@@ -5,14 +5,22 @@ services:
     build: .
     container_name: codex-register
     ports:
-      - "8000:8000"
+      - "${APP_PORT:-8000}:8000"
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
     environment:
       - PYTHONUNBUFFERED=1
+      # Web UI 配置（也可在 .env 文件中设置）
+      - APP_HOST=0.0.0.0
+      - APP_PORT=${APP_PORT:-8000}
+      - APP_ACCESS_PASSWORD=${APP_ACCESS_PASSWORD:-admin123}
+      # 数据库（默认 SQLite，如需 PostgreSQL 取消下方注释）
+      # - APP_DATABASE_URL=postgresql://user:password@db:5432/codex
+      # HTTP 代理（如需代理取消下方注释）
+      # - HTTP_PROXY=http://your-proxy:port
+      # - HTTPS_PROXY=http://your-proxy:port
+    env_file:
+      - path: .env
+        required: false
     restart: unless-stopped
-    # 如果需要代理，取消下面注释并修改地址
-    # environment:
-    #   - HTTP_PROXY=http://your-proxy:port
-    #   - HTTPS_PROXY=http://your-proxy:port

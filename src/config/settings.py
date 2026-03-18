@@ -87,6 +87,13 @@ SETTING_DEFINITIONS: Dict[str, SettingDefinition] = {
         description="Web UI 密钥",
         is_secret=True
     ),
+    "webui_access_password": SettingDefinition(
+        db_key="webui.access_password",
+        default_value="admin123",
+        category=SettingCategory.WEBUI,
+        description="Web UI 访问密码",
+        is_secret=True
+    ),
 
     # 日志配置
     "log_level": SettingDefinition(
@@ -294,6 +301,27 @@ SETTING_DEFINITIONS: Dict[str, SettingDefinition] = {
         is_secret=True
     ),
 
+    # Team Manager 配置
+    "tm_enabled": SettingDefinition(
+        db_key="tm.enabled",
+        default_value=False,
+        category=SettingCategory.GENERAL,
+        description="是否启用 Team Manager 上传"
+    ),
+    "tm_api_url": SettingDefinition(
+        db_key="tm.api_url",
+        default_value="",
+        category=SettingCategory.GENERAL,
+        description="Team Manager API 地址"
+    ),
+    "tm_api_key": SettingDefinition(
+        db_key="tm.api_key",
+        default_value="",
+        category=SettingCategory.GENERAL,
+        description="Team Manager API Key",
+        is_secret=True
+    ),
+
     # CPA 上传配置
     "cpa_enabled": SettingDefinition(
         db_key="cpa.enabled",
@@ -375,6 +403,7 @@ SETTING_TYPES: Dict[str, Type] = {
     "email_service_priority": dict,
     "tempmail_timeout": int,
     "tempmail_max_retries": int,
+    "tm_enabled": bool,
     "cpa_enabled": bool,
     "email_code_timeout": int,
     "email_code_poll_interval": int,
@@ -434,6 +463,14 @@ def _convert_value(attr_name: str, value: str) -> Any:
         return value
 
 
+def _normalize_database_url(url: str) -> str:
+    if url.startswith("postgres://"):
+        return "postgresql+psycopg://" + url[len("postgres://"):]
+    if url.startswith("postgresql://"):
+        return "postgresql+psycopg://" + url[len("postgresql://"):]
+    return url
+
+
 def _value_to_string(value: Any) -> str:
     """将值转换为数据库存储的字符串"""
     if isinstance(value, SecretStr):
@@ -462,7 +499,12 @@ def init_default_settings() -> None:
             for attr_name, defn in SETTING_DEFINITIONS.items():
                 existing = get_setting(db, defn.db_key)
                 if not existing:
-                    default_value = _value_to_string(defn.default_value)
+                    default_value = defn.default_value
+                    if attr_name == "database_url":
+                        env_url = os.environ.get("APP_DATABASE_URL") or os.environ.get("DATABASE_URL")
+                        if env_url:
+                            default_value = _normalize_database_url(env_url)
+                    default_value = _value_to_string(default_value)
                     set_setting(
                         db,
                         defn.db_key,
@@ -472,7 +514,8 @@ def init_default_settings() -> None:
                     )
                     print(f"[Settings] 初始化默认设置: {defn.db_key} = {default_value if not defn.is_secret else '***'}")
     except Exception as e:
-        print(f"[Settings] 初始化默认设置失败: {e}")
+        if "未初始化" not in str(e):
+            print(f"[Settings] 初始化默认设置失败: {e}")
 
 
 def _load_settings_from_db() -> Dict[str, Any]:
@@ -490,9 +533,25 @@ def _load_settings_from_db() -> Dict[str, Any]:
                 else:
                     # 数据库中没有此设置，使用默认值
                     settings_dict[attr_name] = _convert_value(attr_name, _value_to_string(defn.default_value))
+            env_url = os.environ.get("APP_DATABASE_URL") or os.environ.get("DATABASE_URL")
+            if env_url:
+                settings_dict["database_url"] = _normalize_database_url(env_url)
+            env_host = os.environ.get("APP_HOST")
+            if env_host:
+                settings_dict["webui_host"] = env_host
+            env_port = os.environ.get("APP_PORT")
+            if env_port:
+                try:
+                    settings_dict["webui_port"] = int(env_port)
+                except ValueError:
+                    pass
+            env_password = os.environ.get("APP_ACCESS_PASSWORD")
+            if env_password:
+                settings_dict["webui_access_password"] = env_password
         return settings_dict
     except Exception as e:
-        print(f"[Settings] 从数据库加载设置失败: {e}，使用默认值")
+        if "未初始化" not in str(e):
+            print(f"[Settings] 从数据库加载设置失败: {e}，使用默认值")
         return {name: defn.default_value for name, defn in SETTING_DEFINITIONS.items()}
 
 
@@ -515,7 +574,8 @@ def _save_settings_to_db(**kwargs) -> None:
                         description=defn.description
                     )
     except Exception as e:
-        print(f"[Settings] 保存设置到数据库失败: {e}")
+        if "未初始化" not in str(e):
+            print(f"[Settings] 保存设置到数据库失败: {e}")
 
 
 class Settings(BaseModel):
@@ -534,9 +594,14 @@ class Settings(BaseModel):
     @field_validator('database_url', mode='before')
     @classmethod
     def validate_database_url(cls, v):
+        if isinstance(v, str):
+            if v.startswith(("postgres://", "postgresql://")):
+                return _normalize_database_url(v)
+            if v.startswith(("postgresql+psycopg://", "postgresql+psycopg2://")):
+                return v
         if isinstance(v, str) and v.startswith("sqlite:///"):
             return v
-        if isinstance(v, str) and not v.startswith(("sqlite:///", "postgresql://", "mysql://")):
+        if isinstance(v, str) and not v.startswith(("sqlite:///", "postgresql://", "postgresql+psycopg://", "postgresql+psycopg2://", "mysql://")):
             # 如果是文件路径，转换为 SQLite URL
             if os.path.isabs(v) or ":/" not in v:
                 return f"sqlite:///{v}"
@@ -546,6 +611,7 @@ class Settings(BaseModel):
     webui_host: str = "0.0.0.0"
     webui_port: int = 8000
     webui_secret_key: SecretStr = SecretStr("your-secret-key-change-in-production")
+    webui_access_password: SecretStr = SecretStr("admin123")
 
     # 日志配置
     log_level: str = "INFO"
@@ -612,6 +678,11 @@ class Settings(BaseModel):
 
     # 安全配置
     encryption_key: SecretStr = SecretStr("your-encryption-key-change-in-production")
+
+    # Team Manager 配置
+    tm_enabled: bool = False
+    tm_api_url: str = ""
+    tm_api_key: Optional[SecretStr] = None
 
     # CPA 上传配置
     cpa_enabled: bool = False

@@ -124,6 +124,43 @@ python webui.py --host 0.0.0.0 --port 8080 --access-password mypassword
 > codex-register.exe --access-password mypassword
 > ```
 
+### Docker 部署
+
+项目支持通过 Docker 进行容器化部署。Docker 镜像已托管至 GitHub Container Registry (GHCR)。
+
+#### 使用 docker-compose (推荐)
+
+在项目根目录下，直接使用 `docker-compose` 启动：
+
+```bash
+docker-compose up -d
+```
+你可以在 `docker-compose.yml` 中修改相关的环境变量，例如配置端口或者设置 `WEBUI_ACCESS_PASSWORD` 访问密码。
+
+#### 直接使用 docker run
+
+如果你不想使用 docker-compose，也可以直接拉取并运行镜像：
+
+```bash
+docker run -d \
+  -p 1455:1455 \
+  -e WEBUI_HOST=0.0.0.0 \
+  -e WEBUI_PORT=1455 \
+  -e WEBUI_ACCESS_PASSWORD=your_secure_password \
+  -v $(pwd)/data:/app/data \
+  --name codex-register \
+  ghcr.io/yunxilyf/codex-register:latest
+```
+
+环境变量说明：
+- `WEBUI_HOST`: 监听的主机地址 (默认 `0.0.0.0`)
+- `WEBUI_PORT`: 监听的端口 (默认 `1455`)
+- `WEBUI_ACCESS_PASSWORD`: 设置 Web UI 的访问密码
+- `DEBUG`: 设为 `1` 或 `true` 开启调试模式
+- `LOG_LEVEL`: 日志级别，如 `info`, `debug`
+
+> **注意**：`-v $(pwd)/data:/app/data` 挂载参数非常重要，它确保了你的数据库文件和账户信息在容器重启或更新后不会丢失。
+
 ### 使用远程 PostgreSQL
 
 通过环境变量指定数据库连接字符串：

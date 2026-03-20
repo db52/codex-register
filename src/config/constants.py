@@ -33,10 +33,11 @@ class EmailServiceType(str, Enum):
     """邮箱服务类型"""
     TEMPMAIL = "tempmail"
     OUTLOOK = "outlook"
-    CUSTOM_DOMAIN = "custom_domain"
+    MOE_MAIL = "moe_mail"
     TEMP_MAIL = "temp_mail"
     DUCK_MAIL = "duck_mail"
     FREEMAIL = "freemail"
+    IMAP_MAIL = "imap_mail"
 
 
 # ============================================================================
@@ -109,7 +110,7 @@ EMAIL_SERVICE_DEFAULTS = {
         "smtp_port": 587,
         "timeout": 30,
     },
-    "custom_domain": {
+    "moe_mail": {
         "base_url": "",  # 需要用户配置
         "api_key_header": "X-API-Key",
         "timeout": 30,
@@ -126,6 +127,15 @@ EMAIL_SERVICE_DEFAULTS = {
         "base_url": "",
         "admin_token": "",
         "domain": "",
+        "timeout": 30,
+        "max_retries": 3,
+    },
+    "imap_mail": {
+        "host": "",
+        "port": 993,
+        "use_ssl": True,
+        "email": "",
+        "password": "",
         "timeout": 30,
         "max_retries": 3,
     }

@@ -21,7 +21,7 @@ let toastShown = false;  // 标记是否已显示过 toast
 let availableServices = {
     tempmail: { available: true, services: [] },
     outlook: { available: false, services: [] },
-    custom_domain: { available: false, services: [] },
+    moe_mail: { available: false, services: [] },
     temp_mail: { available: false, services: [] },
     duck_mail: { available: false, services: [] },
     freemail: { available: false, services: [] }
@@ -293,15 +293,15 @@ function updateEmailServiceOptions() {
     }
 
     // 自定义域名
-    if (availableServices.custom_domain.available) {
+    if (availableServices.moe_mail.available) {
         const optgroup = document.createElement('optgroup');
-        optgroup.label = `🔗 自定义域名 (${availableServices.custom_domain.count} 个服务)`;
+        optgroup.label = `🔗 自定义域名 (${availableServices.moe_mail.count} 个服务)`;
 
-        availableServices.custom_domain.services.forEach(service => {
+        availableServices.moe_mail.services.forEach(service => {
             const option = document.createElement('option');
-            option.value = `custom_domain:${service.id || 'default'}`;
+            option.value = `moe_mail:${service.id || 'default'}`;
             option.textContent = service.name + (service.default_domain ? ` (@${service.default_domain})` : '');
-            option.dataset.type = 'custom_domain';
+            option.dataset.type = 'moe_mail';
             if (service.id) {
                 option.dataset.serviceId = service.id;
             }
@@ -402,8 +402,8 @@ function handleServiceChange(e) {
         if (service) {
             addLog('info', `[系统] 已选择 Outlook 账户: ${service.name}`);
         }
-    } else if (type === 'custom_domain') {
-        const service = availableServices.custom_domain.services.find(s => s.id == id);
+    } else if (type === 'moe_mail') {
+        const service = availableServices.moe_mail.services.find(s => s.id == id);
         if (service) {
             addLog('info', `[系统] 已选择自定义域名服务: ${service.name}`);
         }

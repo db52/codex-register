@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>系统设置 - OpenAI 注册系统</title>
-    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/style.css?v={{ static_version }}">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚙️</text></svg>">
 </head>
 <body>
@@ -38,8 +38,7 @@
             <div class="tabs">
                 <button class="tab-btn active" data-tab="proxy">🌐 代理设置</button>
                 <button class="tab-btn" data-tab="webui">🔒 访问控制</button>
-                <button class="tab-btn" data-tab="cpa">☁️ CPA上传</button>
-                <button class="tab-btn" data-tab="team-manager">🚀 Team Manager</button>
+                <button class="tab-btn" data-tab="upload">☁️ 上传</button>
                 <button class="tab-btn" data-tab="outlook">📮 Outlook配置</button>
                 <button class="tab-btn" data-tab="registration">⚙️ 注册配置</button>
                 <button class="tab-btn" data-tab="email-code">📧 验证码配置</button>
@@ -48,66 +47,11 @@
 
             <!-- 代理设置 -->
             <div class="tab-content active" id="proxy-tab">
-                <!-- 默认代理配置 -->
-                <div class="card">
-                    <div class="card-header">
-                        <h3>默认代理配置</h3>
-                        <span class="hint">当代理列表为空时使用此配置</span>
-                    </div>
-                    <div class="card-body">
-                        <form id="proxy-form">
-                            <div class="form-group">
-                                <label>
-                                    <input type="checkbox" id="proxy-enabled" name="enabled">
-                                    启用代理
-                                </label>
-                            </div>
-
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label for="proxy-type">代理类型</label>
-                                    <select id="proxy-type" name="type">
-                                        <option value="http">HTTP</option>
-                                        <option value="socks5">SOCKS5</option>
-                                    </select>
-                                </div>
-
-                                <div class="form-group">
-                                    <label for="proxy-host">主机地址</label>
-                                    <input type="text" id="proxy-host" name="host" value="127.0.0.1">
-                                </div>
-
-                                <div class="form-group">
-                                    <label for="proxy-port">端口</label>
-                                    <input type="number" id="proxy-port" name="port" value="7890">
-                                </div>
-                            </div>
-
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label for="proxy-username">用户名 (可选)</label>
-                                    <input type="text" id="proxy-username" name="username" autocomplete="off">
-                                </div>
-
-                                <div class="form-group">
-                                    <label for="proxy-password">密码 (可选)</label>
-                                    <input type="password" id="proxy-password" name="password" autocomplete="new-password">
-                                </div>
-                            </div>
-
-                            <div class="form-actions">
-                                <button type="submit" class="btn btn-primary">💾 保存设置</button>
-                                <button type="button" class="btn btn-secondary" id="test-proxy-btn">🔌 测试连接</button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-
                 <!-- 动态代理配置 -->
                 <div class="card" style="margin-top: var(--spacing-lg);">
                     <div class="card-header">
                         <h3>动态代理配置</h3>
-                        <span class="hint">通过 API 每次获取新代理 IP，优先级高于静态代理和代理列表</span>
+                        <span class="hint">通过 API 每次获取新代理 IP，优先级高于代理列表</span>
                     </div>
                     <div class="card-body">
                         <form id="dynamic-proxy-form">
@@ -163,9 +107,10 @@
                                         <th>名称</th>
                                         <th>类型</th>
                                         <th>地址</th>
+                                        <th style="width: 60px;">默认</th>
                                         <th style="width: 80px;">状态</th>
                                         <th style="width: 120px;">最后使用</th>
-                                        <th style="width: 150px;">操作</th>
+                                        <th style="width: 180px;">操作</th>
                                     </tr>
                                 </thead>
                                 <tbody id="proxies-table">
@@ -256,76 +201,217 @@
                 </div>
             </div>
 
-            <!-- CPA 上传设置 -->
-            <div class="tab-content" id="cpa-tab">
-                <div class="card">
+            <!-- 上传服务设置（CPA + Sub2API + Team Manager） -->
+            <div class="tab-content" id="upload-tab">
+                <!-- CPA 服务管理 -->
+                <div class="card" style="margin-top: var(--spacing-lg);">
                     <div class="card-header">
-                        <h3>CPA 上传配置</h3>
-                        <span class="hint">配置 Codex Protocol API 上传功能</span>
+                        <h3>☁️ CPA 服务</h3>
+                        <button class="btn btn-primary btn-sm" id="add-cpa-service-btn">+ 添加服务</button>
                     </div>
-                    <div class="card-body">
-                        <form id="cpa-form">
-                            <div class="form-group">
-                                <label>
-                                    <input type="checkbox" id="cpa-enabled" name="enabled">
-                                    启用 CPA 上传
-                                </label>
-                                <p class="hint">启用后可在账号管理页面上传账号到 CPA 管理平台</p>
-                            </div>
+                    <div class="card-body" style="padding: 0;">
+                        <div class="table-container">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width:150px;">名称</th>
+                                        <th>API URL</th>
+                                        <th style="width:80px;">状态</th>
+                                        <th style="width:60px;text-align:center;">优先级</th>
+                                        <th style="width:220px;">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="cpa-services-table">
+                                    <tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px;">加载中...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
 
-                            <div class="form-group">
-                                <label for="cpa-api-url">API URL</label>
-                                <input type="text" id="cpa-api-url" name="api_url" placeholder="例如: https://cpa.example.com">
-                                <p class="hint">CPA 管理平台的 API 地址</p>
-                            </div>
+                <!-- Sub2API 服务管理 -->
+                <div class="card" style="margin-top: var(--spacing-lg);">
+                    <div class="card-header">
+                        <h3>🔗 Sub2API 服务</h3>
+                        <button class="btn btn-primary btn-sm" id="add-sub2api-service-btn">+ 添加服务</button>
+                    </div>
+                    <div class="card-body" style="padding: 0;">
+                        <div class="table-container">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width:150px;">名称</th>
+                                        <th>API URL</th>
+                                        <th style="width:80px;">状态</th>
+                                        <th style="width:60px;text-align:center;">优先级</th>
+                                        <th style="width:220px;">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="sub2api-services-table">
+                                    <tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px;">加载中...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
 
-                            <div class="form-group">
-                                <label for="cpa-api-token">API Token</label>
-                                <input type="password" id="cpa-api-token" name="api_token" placeholder="留空则保持原值" autocomplete="new-password">
-                                <p class="hint">CPA 管理平台的认证 Token</p>
-                            </div>
+                <!-- Team Manager 服务管理 -->
+                <div class="card" style="margin-top: var(--spacing-lg);">
+                    <div class="card-header">
+                        <h3>🚀 Team Manager 服务</h3>
+                        <button class="btn btn-primary btn-sm" id="add-tm-service-btn">+ 添加服务</button>
+                    </div>
+                    <div class="card-body" style="padding: 0;">
+                        <div class="table-container">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width:150px;">名称</th>
+                                        <th>API URL</th>
+                                        <th style="width:80px;">状态</th>
+                                        <th style="width:60px;text-align:center;">优先级</th>
+                                        <th style="width:220px;">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tm-services-table">
+                                    <tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px;">加载中...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
 
+            <!-- Team Manager 服务编辑模态框 -->
+            <div class="modal" id="tm-service-edit-modal">
+                <div class="modal-content" style="max-width: 500px;">
+                    <div class="modal-header">
+                        <h3 id="tm-service-modal-title">添加 Team Manager 服务</h3>
+                        <button class="modal-close" id="close-tm-service-modal">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <form id="tm-service-form">
+                            <input type="hidden" id="tm-service-id">
+                            <div class="form-group">
+                                <label for="tm-service-name">名称 *</label>
+                                <input type="text" id="tm-service-name" placeholder="例如: 主服务" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="tm-service-url">API URL *</label>
+                                <input type="text" id="tm-service-url" placeholder="https://tm.example.com" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="tm-service-key">API Key</label>
+                                <input type="password" id="tm-service-key" placeholder="编辑时留空则保持原值" autocomplete="new-password">
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="tm-service-priority">优先级</label>
+                                    <input type="number" id="tm-service-priority" value="0" min="0">
+                                    <p class="hint">数字越小优先级越高</p>
+                                </div>
+                                <div class="form-group">
+                                    <label>&nbsp;</label>
+                                    <label style="margin-top:10px;display:flex;align-items:center;gap:8px;">
+                                        <input type="checkbox" id="tm-service-enabled" checked> 启用
+                                    </label>
+                                </div>
+                            </div>
                             <div class="form-actions">
-                                <button type="submit" class="btn btn-primary">💾 保存设置</button>
-                                <button type="button" class="btn btn-secondary" id="test-cpa-btn">🔌 测试连接</button>
+                                <button type="submit" class="btn btn-primary">💾 保存</button>
+                                <button type="button" class="btn btn-secondary" id="test-tm-service-btn">🔌 测试连接</button>
+                                <button type="button" class="btn btn-secondary" id="cancel-tm-service-btn">取消</button>
                             </div>
                         </form>
                     </div>
                 </div>
             </div>
 
-            <!-- Team Manager 设置 -->
-            <div class="tab-content" id="team-manager-tab">
-                <div class="card">
-                    <div class="card-header">
-                        <h3>Team Manager 配置</h3>
-                        <span class="hint">配置 Team Manager 账号导入功能</span>
+            <!-- Sub2API 服务编辑模态框 -->
+            <div class="modal" id="sub2api-service-edit-modal">
+                <div class="modal-content" style="max-width: 500px;">
+                    <div class="modal-header">
+                        <h3 id="sub2api-service-modal-title">添加 Sub2API 服务</h3>
+                        <button class="modal-close" id="close-sub2api-service-modal">&times;</button>
                     </div>
-                    <div class="card-body">
-                        <form id="tm-form">
+                    <div class="modal-body">
+                        <form id="sub2api-service-form">
+                            <input type="hidden" id="sub2api-service-id">
                             <div class="form-group">
-                                <label>
-                                    <input type="checkbox" id="tm-enabled" name="enabled">
-                                    启用 Team Manager 上传
-                                </label>
-                                <p class="hint">启用后可在账号管理页面将账号导入 Team Manager 平台</p>
+                                <label for="sub2api-service-name">名称 *</label>
+                                <input type="text" id="sub2api-service-name" placeholder="例如: 主服务" required>
                             </div>
-
                             <div class="form-group">
-                                <label for="tm-api-url">API URL</label>
-                                <input type="text" id="tm-api-url" name="api_url" placeholder="例如: https://tm.example.com">
-                                <p class="hint">Team Manager 平台的 API 地址</p>
+                                <label for="sub2api-service-url">API URL *</label>
+                                <input type="text" id="sub2api-service-url" placeholder="http://host" required>
                             </div>
-
                             <div class="form-group">
-                                <label for="tm-api-key">API Key</label>
-                                <input type="password" id="tm-api-key" name="api_key" placeholder="留空则保持原值" autocomplete="new-password">
-                                <p class="hint">Team Manager 平台的认证 Key</p>
+                                <label for="sub2api-service-key">API Key</label>
+                                <input type="password" id="sub2api-service-key" placeholder="编辑时留空则保持原值" autocomplete="new-password">
                             </div>
-
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="sub2api-service-priority">优先级</label>
+                                    <input type="number" id="sub2api-service-priority" value="0" min="0">
+                                    <p class="hint">数字越小优先级越高</p>
+                                </div>
+                                <div class="form-group">
+                                    <label>&nbsp;</label>
+                                    <label style="margin-top:10px;display:flex;align-items:center;gap:8px;">
+                                        <input type="checkbox" id="sub2api-service-enabled" checked> 启用
+                                    </label>
+                                </div>
+                            </div>
                             <div class="form-actions">
-                                <button type="submit" class="btn btn-primary">💾 保存设置</button>
-                                <button type="button" class="btn btn-secondary" id="test-tm-btn">🔌 测试连接</button>
+                                <button type="submit" class="btn btn-primary">💾 保存</button>
+                                <button type="button" class="btn btn-secondary" id="test-sub2api-service-btn">🔌 测试连接</button>
+                                <button type="button" class="btn btn-secondary" id="cancel-sub2api-service-btn">取消</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- CPA 服务编辑模态框 -->
+            <div class="modal" id="cpa-service-edit-modal">
+                <div class="modal-content" style="max-width: 500px;">
+                    <div class="modal-header">
+                        <h3 id="cpa-service-modal-title">添加 CPA 服务</h3>
+                        <button class="modal-close" id="close-cpa-service-modal">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <form id="cpa-service-form">
+                            <input type="hidden" id="cpa-service-id">
+                            <div class="form-group">
+                                <label for="cpa-service-name">名称 *</label>
+                                <input type="text" id="cpa-service-name" placeholder="例如: 主服务" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="cpa-service-url">API URL *</label>
+                                <input type="text" id="cpa-service-url" placeholder="https://cpa.example.com" required>
+                                <p class="hint">支持填写根地址、`/v0/management` 或完整的 `/v0/management/auth-files` 地址</p>
+                            </div>
+                            <div class="form-group">
+                                <label for="cpa-service-token">API Token</label>
+                                <input type="password" id="cpa-service-token" placeholder="编辑时留空则保持原值" autocomplete="new-password">
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="cpa-service-priority">优先级</label>
+                                    <input type="number" id="cpa-service-priority" value="0" min="0">
+                                    <p class="hint">数字越小优先级越高</p>
+                                </div>
+                                <div class="form-group">
+                                    <label>&nbsp;</label>
+                                    <label style="margin-top:10px;display:flex;align-items:center;gap:8px;">
+                                        <input type="checkbox" id="cpa-service-enabled" checked> 启用
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="form-actions">
+                                <button type="submit" class="btn btn-primary">💾 保存</button>
+                                <button type="button" class="btn btn-secondary" id="test-cpa-service-btn">🔌 测试连接</button>
+                                <button type="button" class="btn btn-secondary" id="cancel-cpa-service-btn">取消</button>
                             </div>
                         </form>
                     </div>
@@ -483,7 +569,7 @@
         </main>
     </div>
 
-    <script src="/static/js/utils.js"></script>
-    <script src="/static/js/settings.js"></script>
+    <script src="/static/js/utils.js?v={{ static_version }}"></script>
+    <script src="/static/js/settings.js?v={{ static_version }}"></script>
 </body>
 </html>

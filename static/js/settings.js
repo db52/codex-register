@@ -7,9 +7,7 @@
 const elements = {
     tabs: document.querySelectorAll('.tab-btn'),
     tabContents: document.querySelectorAll('.tab-content'),
-    proxyForm: document.getElementById('proxy-form'),
     registrationForm: document.getElementById('registration-settings-form'),
-    testProxyBtn: document.getElementById('test-proxy-btn'),
     backupBtn: document.getElementById('backup-btn'),
     cleanupBtn: document.getElementById('cleanup-btn'),
     addEmailServiceBtn: document.getElementById('add-email-service-btn'),
@@ -41,12 +39,33 @@ const elements = {
     // 动态代理设置
     dynamicProxyForm: document.getElementById('dynamic-proxy-form'),
     testDynamicProxyBtn: document.getElementById('test-dynamic-proxy-btn'),
-    // CPA 设置
-    cpaForm: document.getElementById('cpa-form'),
-    testCpaBtn: document.getElementById('test-cpa-btn'),
-    // Team Manager 设置
-    tmForm: document.getElementById('tm-form'),
-    testTmBtn: document.getElementById('test-tm-btn'),
+    // CPA 服务管理
+    addCpaServiceBtn: document.getElementById('add-cpa-service-btn'),
+    cpaServicesTable: document.getElementById('cpa-services-table'),
+    cpaServiceEditModal: document.getElementById('cpa-service-edit-modal'),
+    closeCpaServiceModal: document.getElementById('close-cpa-service-modal'),
+    cancelCpaServiceBtn: document.getElementById('cancel-cpa-service-btn'),
+    cpaServiceForm: document.getElementById('cpa-service-form'),
+    cpaServiceModalTitle: document.getElementById('cpa-service-modal-title'),
+    testCpaServiceBtn: document.getElementById('test-cpa-service-btn'),
+    // Sub2API 服务管理
+    addSub2ApiServiceBtn: document.getElementById('add-sub2api-service-btn'),
+    sub2ApiServicesTable: document.getElementById('sub2api-services-table'),
+    sub2ApiServiceEditModal: document.getElementById('sub2api-service-edit-modal'),
+    closeSub2ApiServiceModal: document.getElementById('close-sub2api-service-modal'),
+    cancelSub2ApiServiceBtn: document.getElementById('cancel-sub2api-service-btn'),
+    sub2ApiServiceForm: document.getElementById('sub2api-service-form'),
+    sub2ApiServiceModalTitle: document.getElementById('sub2api-service-modal-title'),
+    testSub2ApiServiceBtn: document.getElementById('test-sub2api-service-btn'),
+    // Team Manager 服务管理
+    addTmServiceBtn: document.getElementById('add-tm-service-btn'),
+    tmServicesTable: document.getElementById('tm-services-table'),
+    tmServiceEditModal: document.getElementById('tm-service-edit-modal'),
+    closeTmServiceModal: document.getElementById('close-tm-service-modal'),
+    cancelTmServiceBtn: document.getElementById('cancel-tm-service-btn'),
+    tmServiceForm: document.getElementById('tm-service-form'),
+    tmServiceModalTitle: document.getElementById('tm-service-modal-title'),
+    testTmServiceBtn: document.getElementById('test-tm-service-btn'),
     // 验证码设置
     emailCodeForm: document.getElementById('email-code-form'),
     // Outlook 设置
@@ -65,7 +84,14 @@ document.addEventListener('DOMContentLoaded', () => {
     loadEmailServices();
     loadDatabaseInfo();
     loadProxies();
+    loadCpaServices();
+    loadSub2ApiServices();
+    loadTmServices();
     initEventListeners();
+});
+
+document.addEventListener('click', () => {
+    document.querySelectorAll('.dropdown-menu.active').forEach(m => m.classList.remove('active'));
 });
 
 // 初始化标签页
@@ -85,16 +111,6 @@ function initTabs() {
 
 // 事件监听
 function initEventListeners() {
-    // 代理表单
-    if (elements.proxyForm) {
-        elements.proxyForm.addEventListener('submit', handleSaveProxy);
-    }
-
-    // 测试代理
-    if (elements.testProxyBtn) {
-        elements.testProxyBtn.addEventListener('click', handleTestProxy);
-    }
-
     // 注册配置表单
     if (elements.registrationForm) {
         elements.registrationForm.addEventListener('submit', handleSaveRegistration);
@@ -218,15 +234,6 @@ function initEventListeners() {
         elements.testDynamicProxyBtn.addEventListener('click', handleTestDynamicProxy);
     }
 
-    // CPA 设置
-    if (elements.cpaForm) {
-        elements.cpaForm.addEventListener('submit', handleSaveCpa);
-    }
-
-    if (elements.testCpaBtn) {
-        elements.testCpaBtn.addEventListener('click', handleTestCpa);
-    }
-
     // 验证码设置
     if (elements.emailCodeForm) {
         elements.emailCodeForm.addEventListener('submit', handleSaveEmailCode);
@@ -240,12 +247,70 @@ function initEventListeners() {
     if (elements.webuiSettingsForm) {
         elements.webuiSettingsForm.addEventListener('submit', handleSaveWebuiSettings);
     }
-    // Team Manager 设置
-    if (elements.tmForm) {
-        elements.tmForm.addEventListener('submit', handleSaveTm);
+    // Team Manager 服务管理
+    if (elements.addTmServiceBtn) {
+        elements.addTmServiceBtn.addEventListener('click', () => openTmServiceModal());
     }
-    if (elements.testTmBtn) {
-        elements.testTmBtn.addEventListener('click', handleTestTm);
+    if (elements.closeTmServiceModal) {
+        elements.closeTmServiceModal.addEventListener('click', closeTmServiceModal);
+    }
+    if (elements.cancelTmServiceBtn) {
+        elements.cancelTmServiceBtn.addEventListener('click', closeTmServiceModal);
+    }
+    if (elements.tmServiceEditModal) {
+        elements.tmServiceEditModal.addEventListener('click', (e) => {
+            if (e.target === elements.tmServiceEditModal) closeTmServiceModal();
+        });
+    }
+    if (elements.tmServiceForm) {
+        elements.tmServiceForm.addEventListener('submit', handleSaveTmService);
+    }
+    if (elements.testTmServiceBtn) {
+        elements.testTmServiceBtn.addEventListener('click', handleTestTmService);
+    }
+
+    // CPA 服务管理
+    if (elements.addCpaServiceBtn) {
+        elements.addCpaServiceBtn.addEventListener('click', () => openCpaServiceModal());
+    }
+    if (elements.closeCpaServiceModal) {
+        elements.closeCpaServiceModal.addEventListener('click', closeCpaServiceModal);
+    }
+    if (elements.cancelCpaServiceBtn) {
+        elements.cancelCpaServiceBtn.addEventListener('click', closeCpaServiceModal);
+    }
+    if (elements.cpaServiceEditModal) {
+        elements.cpaServiceEditModal.addEventListener('click', (e) => {
+            if (e.target === elements.cpaServiceEditModal) closeCpaServiceModal();
+        });
+    }
+    if (elements.cpaServiceForm) {
+        elements.cpaServiceForm.addEventListener('submit', handleSaveCpaService);
+    }
+    if (elements.testCpaServiceBtn) {
+        elements.testCpaServiceBtn.addEventListener('click', handleTestCpaService);
+    }
+
+    // Sub2API 服务管理
+    if (elements.addSub2ApiServiceBtn) {
+        elements.addSub2ApiServiceBtn.addEventListener('click', () => openSub2ApiServiceModal());
+    }
+    if (elements.closeSub2ApiServiceModal) {
+        elements.closeSub2ApiServiceModal.addEventListener('click', closeSub2ApiServiceModal);
+    }
+    if (elements.cancelSub2ApiServiceBtn) {
+        elements.cancelSub2ApiServiceBtn.addEventListener('click', closeSub2ApiServiceModal);
+    }
+    if (elements.sub2ApiServiceEditModal) {
+        elements.sub2ApiServiceEditModal.addEventListener('click', (e) => {
+            if (e.target === elements.sub2ApiServiceEditModal) closeSub2ApiServiceModal();
+        });
+    }
+    if (elements.sub2ApiServiceForm) {
+        elements.sub2ApiServiceForm.addEventListener('submit', handleSaveSub2ApiService);
+    }
+    if (elements.testSub2ApiServiceBtn) {
+        elements.testSub2ApiServiceBtn.addEventListener('click', handleTestSub2ApiService);
     }
 }
 
@@ -253,13 +318,6 @@ function initEventListeners() {
 async function loadSettings() {
     try {
         const data = await api.get('/settings');
-
-        // 代理设置
-        document.getElementById('proxy-enabled').checked = data.proxy?.enabled || false;
-        document.getElementById('proxy-type').value = data.proxy?.type || 'http';
-        document.getElementById('proxy-host').value = data.proxy?.host || '127.0.0.1';
-        document.getElementById('proxy-port').value = data.proxy?.port || 7890;
-        document.getElementById('proxy-username').value = data.proxy?.username || '';
 
         // 动态代理设置
         document.getElementById('dynamic-proxy-enabled').checked = data.proxy?.dynamic_enabled || false;
@@ -280,12 +338,8 @@ async function loadSettings() {
             document.getElementById('email-code-poll-interval').value = data.email_code.poll_interval || 3;
         }
 
-        // 加载 CPA 设置
-        loadCpaSettings();
         // 加载 Outlook 设置
         loadOutlookSettings();
-        // 加载 Team Manager 设置
-        loadTmSettings();
 
         // Web UI 访问密码提示
         if (data.webui?.has_access_password) {
@@ -374,11 +428,7 @@ function renderEmailServices(services) {
             </td>
             <td>${escapeHtml(service.name)}</td>
             <td>${getServiceTypeText(service.service_type)}</td>
-            <td>
-                <span class="status-badge ${service.enabled ? 'active' : 'disabled'}">
-                    ${service.enabled ? '已启用' : '已禁用'}
-                </span>
-            </td>
+            <td title="${service.enabled ? '已启用' : '已禁用'}">${service.enabled ? '✅' : '⭕'}</td>
             <td>${service.priority}</td>
             <td>${format.date(service.last_used)}</td>
             <td>
@@ -410,57 +460,6 @@ async function loadDatabaseInfo() {
 
     } catch (error) {
         console.error('加载数据库信息失败:', error);
-    }
-}
-
-// 保存代理设置
-async function handleSaveProxy(e) {
-    e.preventDefault();
-
-    const data = {
-        enabled: document.getElementById('proxy-enabled').checked,
-        type: document.getElementById('proxy-type').value,
-        host: document.getElementById('proxy-host').value,
-        port: parseInt(document.getElementById('proxy-port').value),
-        username: document.getElementById('proxy-username').value || null,
-        password: document.getElementById('proxy-password').value || null,
-    };
-
-    try {
-        await api.post('/settings/proxy', data);
-        toast.success('代理设置已保存');
-    } catch (error) {
-        toast.error('保存失败: ' + error.message);
-    }
-}
-
-// 测试代理
-async function handleTestProxy() {
-    elements.testProxyBtn.disabled = true;
-    elements.testProxyBtn.innerHTML = '<span class="loading-spinner"></span> 测试中...';
-
-    try {
-        const data = {
-            enabled: document.getElementById('proxy-enabled').checked,
-            type: document.getElementById('proxy-type').value,
-            host: document.getElementById('proxy-host').value,
-            port: parseInt(document.getElementById('proxy-port').value),
-            username: document.getElementById('proxy-username').value || null,
-            password: document.getElementById('proxy-password').value || null,
-        };
-
-        const result = await api.post('/settings/proxy/test', data);
-
-        if (result.success) {
-            toast.success(result.message);
-        } else {
-            toast.error(result.message);
-        }
-    } catch (error) {
-        toast.error('测试失败: ' + error.message);
-    } finally {
-        elements.testProxyBtn.disabled = false;
-        elements.testProxyBtn.textContent = '🔌 测试连接';
     }
 }
 
@@ -807,29 +806,52 @@ function renderProxies(proxies) {
             <td><span class="badge">${proxy.type.toUpperCase()}</span></td>
             <td><code>${escapeHtml(proxy.host)}:${proxy.port}</code></td>
             <td>
-                <span class="status-badge ${proxy.enabled ? 'active' : 'disabled'}">
-                    ${proxy.enabled ? '已启用' : '已禁用'}
-                </span>
+                ${proxy.is_default
+                    ? '<span class="status-badge active">默认</span>'
+                    : `<button class="btn btn-ghost btn-sm" onclick="handleSetProxyDefault(${proxy.id})" title="设为默认">设默认</button>`
+                }
             </td>
+            <td title="${proxy.enabled ? '已启用' : '已禁用'}">${proxy.enabled ? '✅' : '⭕'}</td>
             <td>${format.date(proxy.last_used)}</td>
             <td>
-                <div class="action-buttons">
-                    <button class="btn btn-ghost btn-sm" onclick="testProxyItem(${proxy.id})" title="测试">
-                        🔌
-                    </button>
-                    <button class="btn btn-ghost btn-sm" onclick="editProxyItem(${proxy.id})" title="编辑">
-                        ✏️
-                    </button>
-                    <button class="btn btn-ghost btn-sm" onclick="toggleProxyItem(${proxy.id}, ${!proxy.enabled})" title="${proxy.enabled ? '禁用' : '启用'}">
-                        ${proxy.enabled ? '🔒' : '🔓'}
-                    </button>
-                    <button class="btn btn-ghost btn-sm" onclick="deleteProxyItem(${proxy.id})" title="删除">
-                        🗑️
-                    </button>
+                <div style="display:flex;gap:4px;align-items:center;white-space:nowrap;">
+                    <button class="btn btn-secondary btn-sm" onclick="editProxyItem(${proxy.id})">编辑</button>
+                    <div class="dropdown" style="position:relative;">
+                        <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();toggleSettingsMoreMenu(this)">更多</button>
+                        <div class="dropdown-menu" style="min-width:80px;">
+                            <a href="#" class="dropdown-item" onclick="event.preventDefault();closeSettingsMoreMenu(this);testProxyItem(${proxy.id})">测试</a>
+                            <a href="#" class="dropdown-item" onclick="event.preventDefault();closeSettingsMoreMenu(this);toggleProxyItem(${proxy.id}, ${!proxy.enabled})">${proxy.enabled ? '禁用' : '启用'}</a>
+                            ${!proxy.is_default ? `<a href="#" class="dropdown-item" onclick="event.preventDefault();closeSettingsMoreMenu(this);handleSetProxyDefault(${proxy.id})">设为默认</a>` : ''}
+                        </div>
+                    </div>
+                    <button class="btn btn-danger btn-sm" onclick="deleteProxyItem(${proxy.id})">删除</button>
                 </div>
             </td>
         </tr>
     `).join('');
+}
+
+function toggleSettingsMoreMenu(btn) {
+    const menu = btn.nextElementSibling;
+    const isActive = menu.classList.contains('active');
+    document.querySelectorAll('.dropdown-menu.active').forEach(m => m.classList.remove('active'));
+    if (!isActive) menu.classList.add('active');
+}
+
+function closeSettingsMoreMenu(el) {
+    const menu = el.closest('.dropdown-menu');
+    if (menu) menu.classList.remove('active');
+}
+
+// 设为默认代理
+async function handleSetProxyDefault(id) {
+    try {
+        await api.post(`/settings/proxies/${id}/set-default`);
+        toast.success('已设为默认代理');
+        loadProxies();
+    } catch (error) {
+        toast.error('操作失败: ' + error.message);
+    }
 }
 
 // 打开代理模态框
@@ -956,45 +978,6 @@ async function handleTestAllProxies() {
 
 
 // ============================================================================
-// CPA 设置管理
-// ============================================================================
-
-// 加载 CPA 设置
-async function loadCpaSettings() {
-    try {
-        const data = await api.get('/settings/cpa');
-
-        document.getElementById('cpa-enabled').checked = data.enabled || false;
-        document.getElementById('cpa-api-url').value = data.api_url || '';
-        // 不填充 token，只显示是否有值
-        document.getElementById('cpa-api-token').value = '';
-        document.getElementById('cpa-api-token').placeholder = data.has_token ? '已配置，留空保持不变' : '请输入 API Token';
-
-    } catch (error) {
-        console.error('加载 CPA 设置失败:', error);
-    }
-}
-
-// 保存 CPA 设置
-async function handleSaveCpa(e) {
-    e.preventDefault();
-
-    const data = {
-        enabled: document.getElementById('cpa-enabled').checked,
-        api_url: document.getElementById('cpa-api-url').value,
-        api_token: document.getElementById('cpa-api-token').value || ''
-    };
-
-    try {
-        await api.post('/settings/cpa', data);
-        toast.success('CPA 设置已保存');
-        loadCpaSettings();
-    } catch (error) {
-        toast.error('保存失败: ' + error.message);
-    }
-}
-
-// ============================================================================
 // Outlook 设置管理
 // ============================================================================
 
@@ -1020,47 +1003,6 @@ async function handleSaveOutlookSettings(e) {
         toast.success('Outlook 设置已保存');
     } catch (error) {
         toast.error('保存失败: ' + error.message);
-    }
-}
-
-// 测试 CPA 连接
-async function handleTestCpa() {
-    const apiUrl = document.getElementById('cpa-api-url').value;
-    const apiToken = document.getElementById('cpa-api-token').value;
-
-    if (!apiUrl) {
-        toast.warning('请输入 API URL');
-        return;
-    }
-
-    // 如果 token 为空，尝试使用已保存的 token 进行测试
-    if (!apiToken) {
-        const cpaSettings = await api.get('/settings/cpa');
-        if (!cpaSettings.has_token) {
-            toast.warning('请输入 API Token');
-            return;
-        }
-    }
-
-    elements.testCpaBtn.disabled = true;
-    elements.testCpaBtn.innerHTML = '<span class="loading-spinner"></span> 测试中...';
-
-    try {
-        const result = await api.post('/settings/cpa/test', {
-            api_url: apiUrl,
-            api_token: apiToken || 'use_saved_token'
-        });
-
-        if (result.success) {
-            toast.success(result.message);
-        } else {
-            toast.error(result.message);
-        }
-    } catch (error) {
-        toast.error('测试失败: ' + error.message);
-    } finally {
-        elements.testCpaBtn.disabled = false;
-        elements.testCpaBtn.textContent = '🔌 测试连接';
     }
 }
 
@@ -1113,72 +1055,487 @@ async function handleTestDynamicProxy() {
     }
 }
 
-// ============== Team Manager 设置 ==============
+// ============== Team Manager 服务管理 ==============
 
-async function loadTmSettings() {
+async function loadTmServices() {
+    if (!elements.tmServicesTable) return;
     try {
-        const data = await api.get('/settings/team-manager');
-        document.getElementById('tm-enabled').checked = data.enabled || false;
-        document.getElementById('tm-api-url').value = data.api_url || '';
-        document.getElementById('tm-api-key').value = '';
-        document.getElementById('tm-api-key').placeholder = data.has_api_key ? '已配置，留空保持不变' : '请输入 API Key';
-    } catch (error) {
-        console.error('加载 Team Manager 设置失败:', error);
+        const services = await api.get('/tm-services');
+        renderTmServicesTable(services);
+    } catch (e) {
+        elements.tmServicesTable.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--danger-color);">${e.message}</td></tr>`;
     }
 }
 
-async function handleSaveTm(e) {
+function renderTmServicesTable(services) {
+    if (!services || services.length === 0) {
+        elements.tmServicesTable.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px;">暂无 Team Manager 服务，点击「添加服务」新增</td></tr>';
+        return;
+    }
+    elements.tmServicesTable.innerHTML = services.map(s => `
+        <tr>
+            <td>${escapeHtml(s.name)}</td>
+            <td style="font-size:0.85rem;color:var(--text-muted);">${escapeHtml(s.api_url)}</td>
+            <td style="text-align:center;" title="${s.enabled ? '已启用' : '已禁用'}">${s.enabled ? '✅' : '⭕'}</td>
+            <td style="text-align:center;">${s.priority}</td>
+            <td style="white-space:nowrap;">
+                <button class="btn btn-secondary btn-sm" onclick="editTmService(${s.id})">编辑</button>
+                <button class="btn btn-secondary btn-sm" onclick="testTmServiceById(${s.id})">测试</button>
+                <button class="btn btn-danger btn-sm" onclick="deleteTmService(${s.id}, '${escapeHtml(s.name)}')">删除</button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function openTmServiceModal(service = null) {
+    document.getElementById('tm-service-id').value = service ? service.id : '';
+    document.getElementById('tm-service-name').value = service ? service.name : '';
+    document.getElementById('tm-service-url').value = service ? service.api_url : '';
+    document.getElementById('tm-service-key').value = '';
+    document.getElementById('tm-service-priority').value = service ? service.priority : 0;
+    document.getElementById('tm-service-enabled').checked = service ? service.enabled : true;
+    if (service) {
+        document.getElementById('tm-service-key').placeholder = service.has_key ? '已配置，留空保持不变' : '请输入 API Key';
+    } else {
+        document.getElementById('tm-service-key').placeholder = '请输入 API Key';
+    }
+    elements.tmServiceModalTitle.textContent = service ? '编辑 Team Manager 服务' : '添加 Team Manager 服务';
+    elements.tmServiceEditModal.classList.add('active');
+}
+
+function closeTmServiceModal() {
+    elements.tmServiceEditModal.classList.remove('active');
+}
+
+async function editTmService(id) {
+    try {
+        const service = await api.get(`/tm-services/${id}`);
+        openTmServiceModal(service);
+    } catch (e) {
+        toast.error('获取服务信息失败: ' + e.message);
+    }
+}
+
+async function handleSaveTmService(e) {
     e.preventDefault();
-    const data = {
-        enabled: document.getElementById('tm-enabled').checked,
-        api_url: document.getElementById('tm-api-url').value,
-        api_key: document.getElementById('tm-api-key').value || ''
-    };
-    try {
-        await api.post('/settings/team-manager', data);
-        toast.success('Team Manager 设置已保存');
-        loadTmSettings();
-    } catch (error) {
-        toast.error('保存失败: ' + error.message);
+    const id = document.getElementById('tm-service-id').value;
+    const name = document.getElementById('tm-service-name').value.trim();
+    const apiUrl = document.getElementById('tm-service-url').value.trim();
+    const apiKey = document.getElementById('tm-service-key').value.trim();
+    const priority = parseInt(document.getElementById('tm-service-priority').value) || 0;
+    const enabled = document.getElementById('tm-service-enabled').checked;
+
+    if (!name || !apiUrl) {
+        toast.error('名称和 API URL 不能为空');
+        return;
     }
-}
-
-async function handleTestTm() {
-    const apiUrl = document.getElementById('tm-api-url').value;
-    const apiKey = document.getElementById('tm-api-key').value;
-
-    if (!apiUrl) {
-        toast.error('请先填写 API URL');
+    if (!id && !apiKey) {
+        toast.error('新增服务时 API Key 不能为空');
         return;
     }
 
-    let keyToTest = apiKey;
-    if (!keyToTest) {
-        const saved = await api.get('/settings/team-manager');
-        if (!saved.has_api_key) {
-            toast.error('请先填写 API Key');
-            return;
-        }
-        keyToTest = 'use_saved_key';
-    }
-
-    elements.testTmBtn.disabled = true;
-    elements.testTmBtn.innerHTML = '<span class="loading-spinner"></span> 测试中...';
-
     try {
-        const result = await api.post('/settings/team-manager/test', {
-            api_url: apiUrl,
-            api_key: keyToTest
-        });
+        const payload = { name, api_url: apiUrl, priority, enabled };
+        if (apiKey) payload.api_key = apiKey;
+
+        if (id) {
+            await api.patch(`/tm-services/${id}`, payload);
+            toast.success('服务已更新');
+        } else {
+            payload.api_key = apiKey;
+            await api.post('/tm-services', payload);
+            toast.success('服务已添加');
+        }
+        closeTmServiceModal();
+        loadTmServices();
+    } catch (e) {
+        toast.error('保存失败: ' + e.message);
+    }
+}
+
+async function deleteTmService(id, name) {
+    const confirmed = await confirm(`确定要删除 Team Manager 服务「${name}」吗？`);
+    if (!confirmed) return;
+    try {
+        await api.delete(`/tm-services/${id}`);
+        toast.success('已删除');
+        loadTmServices();
+    } catch (e) {
+        toast.error('删除失败: ' + e.message);
+    }
+}
+
+async function testTmServiceById(id) {
+    try {
+        const result = await api.post(`/tm-services/${id}/test`);
         if (result.success) {
             toast.success(result.message);
         } else {
             toast.error(result.message);
         }
-    } catch (error) {
-        toast.error('测试失败: ' + error.message);
-    } finally {
-        elements.testTmBtn.disabled = false;
-        elements.testTmBtn.textContent = '🔌 测试连接';
+    } catch (e) {
+        toast.error('测试失败: ' + e.message);
     }
+}
+
+async function handleTestTmService() {
+    const apiUrl = document.getElementById('tm-service-url').value.trim();
+    const apiKey = document.getElementById('tm-service-key').value.trim();
+    const id = document.getElementById('tm-service-id').value;
+
+    if (!apiUrl) {
+        toast.error('请先填写 API URL');
+        return;
+    }
+    if (!id && !apiKey) {
+        toast.error('请先填写 API Key');
+        return;
+    }
+
+    elements.testTmServiceBtn.disabled = true;
+    elements.testTmServiceBtn.textContent = '测试中...';
+
+    try {
+        let result;
+        if (id && !apiKey) {
+            result = await api.post(`/tm-services/${id}/test`);
+        } else {
+            result = await api.post('/tm-services/test-connection', { api_url: apiUrl, api_key: apiKey });
+        }
+        if (result.success) {
+            toast.success(result.message);
+        } else {
+            toast.error(result.message);
+        }
+    } catch (e) {
+        toast.error('测试失败: ' + e.message);
+    } finally {
+        elements.testTmServiceBtn.disabled = false;
+        elements.testTmServiceBtn.textContent = '🔌 测试连接';
+    }
+}
+
+
+// ============== CPA 服务管理 ==============
+
+async function loadCpaServices() {
+    if (!elements.cpaServicesTable) return;
+    try {
+        const services = await api.get('/cpa-services');
+        renderCpaServicesTable(services);
+    } catch (e) {
+        elements.cpaServicesTable.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--danger-color);">${e.message}</td></tr>`;
+    }
+}
+
+function renderCpaServicesTable(services) {
+    if (!services || services.length === 0) {
+        elements.cpaServicesTable.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px;">暂无 CPA 服务，点击「添加服务」新增</td></tr>';
+        return;
+    }
+    elements.cpaServicesTable.innerHTML = services.map(s => `
+        <tr>
+            <td>${escapeHtml(s.name)}</td>
+            <td style="font-size:0.85rem;color:var(--text-muted);">${escapeHtml(s.api_url)}</td>
+            <td style="text-align:center;" title="${s.enabled ? '已启用' : '已禁用'}">${s.enabled ? '✅' : '⭕'}</td>
+            <td style="text-align:center;">${s.priority}</td>
+            <td style="white-space:nowrap;">
+                <button class="btn btn-secondary btn-sm" onclick="editCpaService(${s.id})">编辑</button>
+                <button class="btn btn-secondary btn-sm" onclick="testCpaServiceById(${s.id})">测试</button>
+                <button class="btn btn-danger btn-sm" onclick="deleteCpaService(${s.id}, '${escapeHtml(s.name)}')">删除</button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function openCpaServiceModal(service = null) {
+    document.getElementById('cpa-service-id').value = service ? service.id : '';
+    document.getElementById('cpa-service-name').value = service ? service.name : '';
+    document.getElementById('cpa-service-url').value = service ? service.api_url : '';
+    document.getElementById('cpa-service-token').value = '';
+    document.getElementById('cpa-service-priority').value = service ? service.priority : 0;
+    document.getElementById('cpa-service-enabled').checked = service ? service.enabled : true;
+    elements.cpaServiceModalTitle.textContent = service ? '编辑 CPA 服务' : '添加 CPA 服务';
+    elements.cpaServiceEditModal.classList.add('active');
+}
+
+function closeCpaServiceModal() {
+    elements.cpaServiceEditModal.classList.remove('active');
+}
+
+async function editCpaService(id) {
+    try {
+        const service = await api.get(`/cpa-services/${id}`);
+        openCpaServiceModal(service);
+    } catch (e) {
+        toast.error('获取服务信息失败: ' + e.message);
+    }
+}
+
+async function handleSaveCpaService(e) {
+    e.preventDefault();
+    const id = document.getElementById('cpa-service-id').value;
+    const name = document.getElementById('cpa-service-name').value.trim();
+    const apiUrl = document.getElementById('cpa-service-url').value.trim();
+    const apiToken = document.getElementById('cpa-service-token').value.trim();
+    const priority = parseInt(document.getElementById('cpa-service-priority').value) || 0;
+    const enabled = document.getElementById('cpa-service-enabled').checked;
+
+    if (!name || !apiUrl) {
+        toast.error('名称和 API URL 不能为空');
+        return;
+    }
+    if (!id && !apiToken) {
+        toast.error('新增服务时 API Token 不能为空');
+        return;
+    }
+
+    try {
+        const payload = { name, api_url: apiUrl, priority, enabled };
+        if (apiToken) payload.api_token = apiToken;
+
+        if (id) {
+            await api.patch(`/cpa-services/${id}`, payload);
+            toast.success('服务已更新');
+        } else {
+            payload.api_token = apiToken;
+            await api.post('/cpa-services', payload);
+            toast.success('服务已添加');
+        }
+        closeCpaServiceModal();
+        loadCpaServices();
+    } catch (e) {
+        toast.error('保存失败: ' + e.message);
+    }
+}
+
+async function deleteCpaService(id, name) {
+    const confirmed = await confirm(`确定要删除 CPA 服务「${name}」吗？`);
+    if (!confirmed) return;
+    try {
+        await api.delete(`/cpa-services/${id}`);
+        toast.success('已删除');
+        loadCpaServices();
+    } catch (e) {
+        toast.error('删除失败: ' + e.message);
+    }
+}
+
+async function testCpaServiceById(id) {
+    try {
+        const result = await api.post(`/cpa-services/${id}/test`);
+        if (result.success) {
+            toast.success(result.message);
+        } else {
+            toast.error(result.message);
+        }
+    } catch (e) {
+        toast.error('测试失败: ' + e.message);
+    }
+}
+
+async function handleTestCpaService() {
+    const apiUrl = document.getElementById('cpa-service-url').value.trim();
+    const apiToken = document.getElementById('cpa-service-token').value.trim();
+    const id = document.getElementById('cpa-service-id').value;
+
+    if (!apiUrl) {
+        toast.error('请先填写 API URL');
+        return;
+    }
+    // 新增时必须有 token，编辑时 token 可为空（用已保存的）
+    if (!id && !apiToken) {
+        toast.error('请先填写 API Token');
+        return;
+    }
+
+    elements.testCpaServiceBtn.disabled = true;
+    elements.testCpaServiceBtn.textContent = '测试中...';
+
+    try {
+        let result;
+        if (id && !apiToken) {
+            // 编辑时未填 token，直接测试已保存的服务
+            result = await api.post(`/cpa-services/${id}/test`);
+        } else {
+            result = await api.post('/cpa-services/test-connection', { api_url: apiUrl, api_token: apiToken });
+        }
+        if (result.success) {
+            toast.success(result.message);
+        } else {
+            toast.error(result.message);
+        }
+    } catch (e) {
+        toast.error('测试失败: ' + e.message);
+    } finally {
+        elements.testCpaServiceBtn.disabled = false;
+        elements.testCpaServiceBtn.textContent = '🔌 测试连接';
+    }
+}
+
+// ============================================================================
+// Sub2API 服务管理
+// ============================================================================
+
+let _sub2apiEditingId = null;
+
+async function loadSub2ApiServices() {
+    try {
+        const services = await api.get('/sub2api-services');
+        renderSub2ApiServices(services);
+    } catch (e) {
+        if (elements.sub2ApiServicesTable) {
+            elements.sub2ApiServicesTable.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px;">加载失败</td></tr>';
+        }
+    }
+}
+
+function renderSub2ApiServices(services) {
+    if (!elements.sub2ApiServicesTable) return;
+    if (!services || services.length === 0) {
+        elements.sub2ApiServicesTable.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px;">暂无 Sub2API 服务，点击「添加服务」新增</td></tr>';
+        return;
+    }
+    elements.sub2ApiServicesTable.innerHTML = services.map(s => `
+        <tr>
+            <td>${escapeHtml(s.name)}</td>
+            <td style="font-size:0.85rem;color:var(--text-muted);">${escapeHtml(s.api_url)}</td>
+            <td style="text-align:center;" title="${s.enabled ? '已启用' : '已禁用'}">${s.enabled ? '✅' : '⭕'}</td>
+            <td style="text-align:center;">${s.priority}</td>
+            <td style="white-space:nowrap;">
+                <button class="btn btn-secondary btn-sm" onclick="editSub2ApiService(${s.id})">编辑</button>
+                <button class="btn btn-secondary btn-sm" onclick="testSub2ApiServiceById(${s.id})">测试</button>
+                <button class="btn btn-danger btn-sm" onclick="deleteSub2ApiService(${s.id}, '${escapeHtml(s.name)}')">删除</button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function openSub2ApiServiceModal(svc = null) {
+    _sub2apiEditingId = svc ? svc.id : null;
+    elements.sub2ApiServiceModalTitle.textContent = svc ? '编辑 Sub2API 服务' : '添加 Sub2API 服务';
+    elements.sub2ApiServiceForm.reset();
+    document.getElementById('sub2api-service-id').value = svc ? svc.id : '';
+    if (svc) {
+        document.getElementById('sub2api-service-name').value = svc.name || '';
+        document.getElementById('sub2api-service-url').value = svc.api_url || '';
+        document.getElementById('sub2api-service-priority').value = svc.priority ?? 0;
+        document.getElementById('sub2api-service-enabled').checked = svc.enabled !== false;
+        document.getElementById('sub2api-service-key').placeholder = svc.has_key ? '已配置，留空保持不变' : '请输入 API Key';
+    }
+    elements.sub2ApiServiceEditModal.classList.add('active');
+}
+
+function closeSub2ApiServiceModal() {
+    elements.sub2ApiServiceEditModal.classList.remove('active');
+    elements.sub2ApiServiceForm.reset();
+    _sub2apiEditingId = null;
+}
+
+async function editSub2ApiService(id) {
+    try {
+        const svc = await api.get(`/sub2api-services/${id}`);
+        openSub2ApiServiceModal(svc);
+    } catch (e) {
+        toast.error('加载失败: ' + e.message);
+    }
+}
+
+async function deleteSub2ApiService(id, name) {
+    if (!confirm(`确认删除 Sub2API 服务「${name}」？`)) return;
+    try {
+        await api.delete(`/sub2api-services/${id}`);
+        toast.success('服务已删除');
+        loadSub2ApiServices();
+    } catch (e) {
+        toast.error('删除失败: ' + e.message);
+    }
+}
+
+async function handleSaveSub2ApiService(e) {
+    e.preventDefault();
+    const id = document.getElementById('sub2api-service-id').value;
+    const data = {
+        name: document.getElementById('sub2api-service-name').value,
+        api_url: document.getElementById('sub2api-service-url').value,
+        api_key: document.getElementById('sub2api-service-key').value || undefined,
+        priority: parseInt(document.getElementById('sub2api-service-priority').value) || 0,
+        enabled: document.getElementById('sub2api-service-enabled').checked,
+    };
+    if (!id && !data.api_key) {
+        toast.error('请填写 API Key');
+        return;
+    }
+    if (!data.api_key) delete data.api_key;
+
+    try {
+        if (id) {
+            await api.patch(`/sub2api-services/${id}`, data);
+            toast.success('服务已更新');
+        } else {
+            await api.post('/sub2api-services', data);
+            toast.success('服务已添加');
+        }
+        closeSub2ApiServiceModal();
+        loadSub2ApiServices();
+    } catch (e) {
+        toast.error('保存失败: ' + e.message);
+    }
+}
+
+async function testSub2ApiServiceById(id) {
+    try {
+        const result = await api.post(`/sub2api-services/${id}/test`);
+        if (result.success) {
+            toast.success(result.message);
+        } else {
+            toast.error(result.message);
+        }
+    } catch (e) {
+        toast.error('测试失败: ' + e.message);
+    }
+}
+
+async function handleTestSub2ApiService() {
+    const apiUrl = document.getElementById('sub2api-service-url').value.trim();
+    const apiKey = document.getElementById('sub2api-service-key').value.trim();
+    const id = document.getElementById('sub2api-service-id').value;
+
+    if (!apiUrl) {
+        toast.error('请先填写 API URL');
+        return;
+    }
+    if (!id && !apiKey) {
+        toast.error('请先填写 API Key');
+        return;
+    }
+
+    elements.testSub2ApiServiceBtn.disabled = true;
+    elements.testSub2ApiServiceBtn.textContent = '测试中...';
+
+    try {
+        let result;
+        if (id && !apiKey) {
+            result = await api.post(`/sub2api-services/${id}/test`);
+        } else {
+            result = await api.post('/sub2api-services/test-connection', { api_url: apiUrl, api_key: apiKey });
+        }
+        if (result.success) {
+            toast.success(result.message);
+        } else {
+            toast.error(result.message);
+        }
+    } catch (e) {
+        toast.error('测试失败: ' + e.message);
+    } finally {
+        elements.testSub2ApiServiceBtn.disabled = false;
+        elements.testSub2ApiServiceBtn.textContent = '🔌 测试连接';
+    }
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const d = document.createElement('div');
+    d.textContent = text;
+    return d.innerHTML;
 }

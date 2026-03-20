@@ -9,7 +9,7 @@ from typing import Optional
 
 from curl_cffi import requests as cffi_requests
 
-from ..database.models import Account
+from ...database.models import Account
 
 logger = logging.getLogger(__name__)
 

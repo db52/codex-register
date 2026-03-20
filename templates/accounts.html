@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>账号管理 - OpenAI 注册系统</title>
-    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/style.css?v={{ static_version }}">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📋</text></svg>">
     <style>
         .password-cell {
@@ -125,15 +125,19 @@
                         <button class="btn btn-info" id="batch-validate-btn" disabled title="批量验证Token">
                             ✅ 验证Token
                         </button>
-                        <button class="btn btn-success" id="batch-upload-cpa-btn" disabled title="批量上传到CPA">
-                            ☁️ 上传CPA
-                        </button>
                         <button class="btn btn-info" id="batch-check-sub-btn" disabled title="批量检测订阅状态">
                             🔍 检测订阅
                         </button>
-                        <button class="btn btn-success" id="batch-upload-tm-btn" disabled title="批量上传到Team Manager">
-                            🚀 上传TM
-                        </button>
+                        <div class="dropdown">
+                            <button class="btn btn-success" id="batch-upload-btn" disabled>
+                                ☁️ 上传
+                            </button>
+                            <div class="dropdown-menu" id="upload-menu">
+                                <a href="#" class="dropdown-item" id="batch-upload-cpa-item">☁️ 上传到 CPA</a>
+                                <a href="#" class="dropdown-item" id="batch-upload-sub2api-item">🔗 上传到 Sub2API</a>
+                                <a href="#" class="dropdown-item" id="batch-upload-tm-item">🚀 上传到 Team Manager</a>
+                            </div>
+                        </div>
                         <button class="btn btn-danger" id="batch-delete-btn" disabled>
                             🗑️ 批量删除
                         </button>
@@ -168,7 +172,7 @@
                                     <th style="width: 80px;">CPA</th>
                                     <th style="width: 80px;">订阅</th>
                                     <th style="width: 140px;">最后刷新</th>
-                                    <th style="width: 170px;">操作</th>
+                                    <th style="width: 160px;">操作</th>
                                 </tr>
                             </thead>
                             <tbody id="accounts-table">
@@ -213,7 +217,67 @@
         </div>
     </div>
 
-    <script src="/static/js/utils.js"></script>
-    <script src="/static/js/accounts.js"></script>
+    <!-- CPA 服务选择模态框 -->
+    <div class="modal" id="cpa-service-modal">
+        <div class="modal-content" style="max-width: 480px;">
+            <div class="modal-header">
+                <h3>☁️ 选择 CPA 服务</h3>
+                <button class="modal-close" id="close-cpa-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="color: var(--text-muted); margin-bottom: 12px; font-size: 0.9rem;">选择要上传到的 CPA 服务，或使用全局配置。</p>
+                <div id="cpa-service-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto;">
+                    <div style="text-align: center; color: var(--text-muted);">加载中...</div>
+                </div>
+            </div>
+            <div class="modal-footer" style="padding: 12px 20px; border-top: 1px solid var(--border); display: flex; gap: 8px; justify-content: flex-end;">
+                <button class="btn btn-secondary" id="cpa-use-global-btn">使用全局配置</button>
+                <button class="btn btn-secondary" id="cancel-cpa-modal-btn">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Team Manager 服务选择模态框 -->
+    <div class="modal" id="tm-service-modal">
+        <div class="modal-content" style="max-width: 480px;">
+            <div class="modal-header">
+                <h3>🚀 选择 Team Manager 服务</h3>
+                <button class="modal-close" id="close-tm-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="color: var(--text-muted); margin-bottom: 12px; font-size: 0.9rem;">选择要上传到的 Team Manager 服务，或自动选择第一个启用的服务。</p>
+                <div id="tm-service-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto;">
+                    <div style="text-align: center; color: var(--text-muted);">加载中...</div>
+                </div>
+            </div>
+            <div class="modal-footer" style="padding: 12px 20px; border-top: 1px solid var(--border); display: flex; gap: 8px; justify-content: flex-end;">
+                <button class="btn btn-secondary" id="tm-use-auto-btn">自动选择</button>
+                <button class="btn btn-secondary" id="cancel-tm-modal-btn">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sub2API 服务选择模态框 -->
+    <div class="modal" id="sub2api-service-modal">
+        <div class="modal-content" style="max-width: 480px;">
+            <div class="modal-header">
+                <h3>🔗 选择 Sub2API 服务</h3>
+                <button class="modal-close" id="close-sub2api-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="color: var(--text-muted); margin-bottom: 12px; font-size: 0.9rem;">选择要上传到的 Sub2API 服务，或自动选择第一个启用的服务。</p>
+                <div id="sub2api-service-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto;">
+                    <div style="text-align: center; color: var(--text-muted);">加载中...</div>
+                </div>
+            </div>
+            <div class="modal-footer" style="padding: 12px 20px; border-top: 1px solid var(--border); display: flex; gap: 8px; justify-content: flex-end;">
+                <button class="btn btn-secondary" id="sub2api-use-auto-btn">自动选择</button>
+                <button class="btn btn-secondary" id="cancel-sub2api-modal-btn">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/utils.js?v={{ static_version }}"></script>
+    <script src="/static/js/accounts.js?v={{ static_version }}"></script>
 </body>
 </html>

@@ -514,7 +514,8 @@ def init_default_settings() -> None:
                     )
                     print(f"[Settings] 初始化默认设置: {defn.db_key} = {default_value if not defn.is_secret else '***'}")
     except Exception as e:
-        print(f"[Settings] 初始化默认设置失败: {e}")
+        if "未初始化" not in str(e):
+            print(f"[Settings] 初始化默认设置失败: {e}")
 
 
 def _load_settings_from_db() -> Dict[str, Any]:
@@ -549,7 +550,8 @@ def _load_settings_from_db() -> Dict[str, Any]:
                 settings_dict["webui_access_password"] = env_password
         return settings_dict
     except Exception as e:
-        print(f"[Settings] 从数据库加载设置失败: {e}，使用默认值")
+        if "未初始化" not in str(e):
+            print(f"[Settings] 从数据库加载设置失败: {e}，使用默认值")
         return {name: defn.default_value for name, defn in SETTING_DEFINITIONS.items()}
 
 
@@ -572,7 +574,8 @@ def _save_settings_to_db(**kwargs) -> None:
                         description=defn.description
                     )
     except Exception as e:
-        print(f"[Settings] 保存设置到数据库失败: {e}")
+        if "未初始化" not in str(e):
+            print(f"[Settings] 保存设置到数据库失败: {e}")
 
 
 class Settings(BaseModel):

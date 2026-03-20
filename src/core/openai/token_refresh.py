@@ -12,10 +12,10 @@ from datetime import datetime, timedelta
 
 from curl_cffi import requests as cffi_requests
 
-from ..config.settings import get_settings
-from ..database.session import get_db
-from ..database import crud
-from ..database.models import Account
+from ...config.settings import get_settings
+from ...database.session import get_db
+from ...database import crud
+from ...database.models import Account
 
 logger = logging.getLogger(__name__)
 

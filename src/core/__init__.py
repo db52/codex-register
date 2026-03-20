@@ -2,7 +2,7 @@
 核心功能模块
 """
 
-from .oauth import OAuthManager, OAuthStart, generate_oauth_url, submit_callback_url
+from .openai.oauth import OAuthManager, OAuthStart, generate_oauth_url, submit_callback_url
 from .http_client import (
     OpenAIHTTPClient,
     HTTPClient,

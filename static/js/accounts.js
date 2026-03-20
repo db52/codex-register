@@ -25,9 +25,8 @@ const elements = {
     refreshBtn: document.getElementById('refresh-btn'),
     batchRefreshBtn: document.getElementById('batch-refresh-btn'),
     batchValidateBtn: document.getElementById('batch-validate-btn'),
-    batchUploadCpaBtn: document.getElementById('batch-upload-cpa-btn'),
+    batchUploadBtn: document.getElementById('batch-upload-btn'),
     batchCheckSubBtn: document.getElementById('batch-check-sub-btn'),
-    batchUploadTmBtn: document.getElementById('batch-upload-tm-btn'),
     batchDeleteBtn: document.getElementById('batch-delete-btn'),
     exportBtn: document.getElementById('export-btn'),
     exportMenu: document.getElementById('export-menu'),
@@ -94,14 +93,18 @@ function initEventListeners() {
     // 批量验证Token
     elements.batchValidateBtn.addEventListener('click', handleBatchValidate);
 
-    // 批量上传CPA
-    elements.batchUploadCpaBtn.addEventListener('click', handleBatchUploadCpa);
-
     // 批量检测订阅
     elements.batchCheckSubBtn.addEventListener('click', handleBatchCheckSubscription);
 
-    // 批量上传TM
-    elements.batchUploadTmBtn.addEventListener('click', handleBatchUploadTm);
+    // 上传下拉菜单
+    const uploadMenu = document.getElementById('upload-menu');
+    elements.batchUploadBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        uploadMenu.classList.toggle('active');
+    });
+    document.getElementById('batch-upload-cpa-item').addEventListener('click', (e) => { e.preventDefault(); uploadMenu.classList.remove('active'); handleBatchUploadCpa(); });
+    document.getElementById('batch-upload-sub2api-item').addEventListener('click', (e) => { e.preventDefault(); uploadMenu.classList.remove('active'); handleBatchUploadSub2Api(); });
+    document.getElementById('batch-upload-tm-item').addEventListener('click', (e) => { e.preventDefault(); uploadMenu.classList.remove('active'); handleBatchUploadTm(); });
 
     // 批量删除
     elements.batchDeleteBtn.addEventListener('click', handleBatchDelete);
@@ -168,6 +171,8 @@ function initEventListeners() {
     // 点击其他地方关闭下拉菜单
     document.addEventListener('click', () => {
         elements.exportMenu.classList.remove('active');
+        uploadMenu.classList.remove('active');
+        document.querySelectorAll('#accounts-table .dropdown-menu.active').forEach(m => m.classList.remove('active'));
     });
 }
 
@@ -285,21 +290,21 @@ function renderAccounts(accounts) {
             </td>
             <td>${account.id}</td>
             <td>
-                <span class="email-cell" title="${escapeHtml(account.email)}">
-                    ${escapeHtml(account.email)}
+                <span style="display:inline-flex;align-items:center;gap:4px;">
+                    <span class="email-cell" title="${escapeHtml(account.email)}">${escapeHtml(account.email)}</span>
+                    <button class="btn-copy-icon copy-email-btn" data-email="${escapeHtml(account.email)}" title="复制邮箱">📋</button>
                 </span>
             </td>
             <td class="password-cell">
                 ${account.password
-                    ? `<span class="password-hidden" onclick="togglePassword(this, '${escapeHtml(account.password)}')" title="点击查看">${escapeHtml(account.password.substring(0, 4) + '****')}</span>`
+                    ? `<span style="display:inline-flex;align-items:center;gap:4px;">
+                        <span class="password-hidden" data-pwd="${escapeHtml(account.password)}" onclick="togglePassword(this, this.dataset.pwd)" title="点击查看">${escapeHtml(account.password.substring(0, 4) + '****')}</span>
+                        <button class="btn-copy-icon copy-pwd-btn" data-pwd="${escapeHtml(account.password)}" title="复制密码">📋</button>
+                       </span>`
                     : '-'}
             </td>
             <td>${getServiceTypeText(account.email_service)}</td>
-            <td>
-                <span class="status-badge ${getStatusClass('account', account.status)}">
-                    ${getStatusText('account', account.status)}
-                </span>
-            </td>
+            <td>${getStatusIcon(account.status)}</td>
             <td>
                 <div class="cpa-status">
                     ${account.cpa_uploaded
@@ -316,29 +321,17 @@ function renderAccounts(accounts) {
             </td>
             <td>${format.date(account.last_refresh) || '-'}</td>
             <td>
-                <div class="action-buttons">
-                    <button class="btn btn-ghost btn-sm" onclick="refreshToken(${account.id})" title="刷新Token">
-                        🔄
-                    </button>
-                    <button class="btn btn-ghost btn-sm" onclick="uploadToCpa(${account.id})" title="上传到CPA">
-                        ☁️
-                    </button>
-                    <button class="btn btn-ghost btn-sm" onclick="markSubscription(${account.id})" title="标记订阅">
-                        🏷️
-                    </button>
-                    <button class="btn btn-ghost btn-sm" onclick="uploadToTm(${account.id})" title="上传到Team Manager">
-                        🚀
-                    </button>
-                    <button class="btn btn-ghost btn-sm" onclick="viewAccount(${account.id})" title="查看详情">
-                        👁️
-                    </button>
-                    <button class="btn btn-ghost btn-sm" onclick="copyEmail('${escapeHtml(account.email)}')" title="复制邮箱">
-                        📋
-                    </button>
-                    ${account.password ? `<button class="btn btn-ghost btn-sm" onclick="copyToClipboard('${escapeHtml(account.password)}')" title="复制密码">🔑</button>` : ''}
-                    <button class="btn btn-ghost btn-sm" onclick="deleteAccount(${account.id}, '${escapeHtml(account.email)}')" title="删除">
-                        🗑️
-                    </button>
+                <div style="display:flex;gap:4px;align-items:center;white-space:nowrap;">
+                    <button class="btn btn-secondary btn-sm" onclick="viewAccount(${account.id})">详情</button>
+                    <div class="dropdown" style="position:relative;">
+                        <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();toggleMoreMenu(this)">更多</button>
+                        <div class="dropdown-menu" style="min-width:100px;">
+                            <a href="#" class="dropdown-item" onclick="event.preventDefault();closeMoreMenu(this);refreshToken(${account.id})">刷新</a>
+                            <a href="#" class="dropdown-item" onclick="event.preventDefault();closeMoreMenu(this);uploadAccount(${account.id})">上传</a>
+                            <a href="#" class="dropdown-item" onclick="event.preventDefault();closeMoreMenu(this);markSubscription(${account.id})">标记</a>
+                        </div>
+                    </div>
+                    <button class="btn btn-danger btn-sm" onclick="deleteAccount(${account.id}, '${escapeHtml(account.email)}')">删除</button>
                 </div>
             </td>
         </tr>
@@ -361,6 +354,22 @@ function renderAccounts(accounts) {
             elements.selectAll.indeterminate = checkedCount > 0 && checkedCount < allChecked.length;
             updateBatchButtons();
             renderSelectAllBanner();
+        });
+    });
+
+    // 绑定复制邮箱按钮
+    elements.table.querySelectorAll('.copy-email-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            copyToClipboard(btn.dataset.email);
+        });
+    });
+
+    // 绑定复制密码按钮
+    elements.table.querySelectorAll('.copy-pwd-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            copyToClipboard(btn.dataset.pwd);
         });
     });
 
@@ -465,17 +474,15 @@ function updateBatchButtons() {
     elements.batchDeleteBtn.disabled = count === 0;
     elements.batchRefreshBtn.disabled = count === 0;
     elements.batchValidateBtn.disabled = count === 0;
-    elements.batchUploadCpaBtn.disabled = count === 0;
+    elements.batchUploadBtn.disabled = count === 0;
     elements.batchCheckSubBtn.disabled = count === 0;
-    elements.batchUploadTmBtn.disabled = count === 0;
     elements.exportBtn.disabled = count === 0;
 
     elements.batchDeleteBtn.textContent = count > 0 ? `🗑️ 删除 (${count})` : '🗑️ 批量删除';
     elements.batchRefreshBtn.textContent = count > 0 ? `🔄 刷新 (${count})` : '🔄 刷新Token';
     elements.batchValidateBtn.textContent = count > 0 ? `✅ 验证 (${count})` : '✅ 验证Token';
-    elements.batchUploadCpaBtn.textContent = count > 0 ? `☁️ 上传 (${count})` : '☁️ 上传CPA';
+    elements.batchUploadBtn.textContent = count > 0 ? `☁️ 上传 (${count})` : '☁️ 上传';
     elements.batchCheckSubBtn.textContent = count > 0 ? `🔍 检测 (${count})` : '🔍 检测订阅';
-    elements.batchUploadTmBtn.textContent = count > 0 ? `🚀 上传TM (${count})` : '🚀 上传TM';
 }
 
 // 刷新单个账号Token
@@ -740,11 +747,123 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+// ============== CPA 服务选择 ==============
+
+// 弹出 CPA 服务选择框，返回 Promise<{cpa_service_id: number|null}|null>
+// null 表示用户取消，{cpa_service_id: null} 表示使用全局配置
+function selectCpaService() {
+    return new Promise(async (resolve) => {
+        const modal = document.getElementById('cpa-service-modal');
+        const listEl = document.getElementById('cpa-service-list');
+        const closeBtn = document.getElementById('close-cpa-modal');
+        const cancelBtn = document.getElementById('cancel-cpa-modal-btn');
+        const globalBtn = document.getElementById('cpa-use-global-btn');
+
+        // 加载服务列表
+        listEl.innerHTML = '<div style="text-align:center;color:var(--text-muted)">加载中...</div>';
+        modal.classList.add('active');
+
+        let services = [];
+        try {
+            services = await api.get('/cpa-services?enabled=true');
+        } catch (e) {
+            services = [];
+        }
+
+        if (services.length === 0) {
+            listEl.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:12px;">暂无已启用的 CPA 服务，将使用全局配置</div>';
+        } else {
+            listEl.innerHTML = services.map(s => `
+                <div class="cpa-service-item" data-id="${s.id}" style="
+                    padding: 10px 14px;
+                    border: 1px solid var(--border);
+                    border-radius: 8px;
+                    cursor: pointer;
+                    transition: background 0.15s;
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                ">
+                    <div>
+                        <div style="font-weight:500;">${escapeHtml(s.name)}</div>
+                        <div style="font-size:0.8rem;color:var(--text-muted);">${escapeHtml(s.api_url)}</div>
+                    </div>
+                    <span class="badge" style="background:var(--success-color);color:#fff;font-size:0.7rem;padding:2px 8px;border-radius:10px;">选择</span>
+                </div>
+            `).join('');
+
+            listEl.querySelectorAll('.cpa-service-item').forEach(item => {
+                item.addEventListener('mouseenter', () => item.style.background = 'var(--surface-hover)');
+                item.addEventListener('mouseleave', () => item.style.background = '');
+                item.addEventListener('click', () => {
+                    cleanup();
+                    resolve({ cpa_service_id: parseInt(item.dataset.id) });
+                });
+            });
+        }
+
+        function cleanup() {
+            modal.classList.remove('active');
+            closeBtn.removeEventListener('click', onCancel);
+            cancelBtn.removeEventListener('click', onCancel);
+            globalBtn.removeEventListener('click', onGlobal);
+        }
+        function onCancel() { cleanup(); resolve(null); }
+        function onGlobal() { cleanup(); resolve({ cpa_service_id: null }); }
+
+        closeBtn.addEventListener('click', onCancel);
+        cancelBtn.addEventListener('click', onCancel);
+        globalBtn.addEventListener('click', onGlobal);
+    });
+}
+
+// 统一上传入口：弹出目标选择
+async function uploadAccount(id) {
+    const targets = [
+        { label: '☁️ 上传到 CPA', value: 'cpa' },
+        { label: '🔗 上传到 Sub2API', value: 'sub2api' },
+        { label: '🚀 上传到 Team Manager', value: 'tm' },
+    ];
+
+    const choice = await new Promise((resolve) => {
+        const modal = document.createElement('div');
+        modal.className = 'modal active';
+        modal.innerHTML = `
+            <div class="modal-content" style="max-width:360px;">
+                <div class="modal-header">
+                    <h3>☁️ 选择上传目标</h3>
+                    <button class="modal-close" id="_upload-close">&times;</button>
+                </div>
+                <div class="modal-body" style="display:flex;flex-direction:column;gap:8px;">
+                    ${targets.map(t => `
+                        <button class="btn btn-secondary" data-val="${t.value}" style="text-align:left;">${t.label}</button>
+                    `).join('')}
+                </div>
+            </div>`;
+        document.body.appendChild(modal);
+        modal.querySelector('#_upload-close').addEventListener('click', () => { modal.remove(); resolve(null); });
+        modal.addEventListener('click', (e) => { if (e.target === modal) { modal.remove(); resolve(null); } });
+        modal.querySelectorAll('button[data-val]').forEach(btn => {
+            btn.addEventListener('click', () => { modal.remove(); resolve(btn.dataset.val); });
+        });
+    });
+
+    if (!choice) return;
+    if (choice === 'cpa') return uploadToCpa(id);
+    if (choice === 'sub2api') return uploadToSub2Api(id);
+    if (choice === 'tm') return uploadToTm(id);
+}
+
 // 上传单个账号到CPA
 async function uploadToCpa(id) {
+    const choice = await selectCpaService();
+    if (choice === null) return;  // 用户取消
+
     try {
         toast.info('正在上传到CPA...');
-        const result = await api.post(`/accounts/${id}/upload-cpa`);
+        const payload = {};
+        if (choice.cpa_service_id != null) payload.cpa_service_id = choice.cpa_service_id;
+        const result = await api.post(`/accounts/${id}/upload-cpa`, payload);
 
         if (result.success) {
             toast.success('上传成功');
@@ -762,22 +881,23 @@ async function handleBatchUploadCpa() {
     const count = getEffectiveCount();
     if (count === 0) return;
 
+    const choice = await selectCpaService();
+    if (choice === null) return;  // 用户取消
+
     const confirmed = await confirm(`确定要将选中的 ${count} 个账号上传到CPA吗？`);
     if (!confirmed) return;
 
-    elements.batchUploadCpaBtn.disabled = true;
-    elements.batchUploadCpaBtn.textContent = '上传中...';
+    elements.batchUploadBtn.disabled = true;
+    elements.batchUploadBtn.textContent = '上传中...';
 
     try {
-        const result = await api.post('/accounts/batch-upload-cpa', buildBatchPayload());
+        const payload = buildBatchPayload();
+        if (choice.cpa_service_id != null) payload.cpa_service_id = choice.cpa_service_id;
+        const result = await api.post('/accounts/batch-upload-cpa', payload);
 
         let message = `成功: ${result.success_count}`;
-        if (result.failed_count > 0) {
-            message += `, 失败: ${result.failed_count}`;
-        }
-        if (result.skipped_count > 0) {
-            message += `, 跳过: ${result.skipped_count}`;
-        }
+        if (result.failed_count > 0) message += `, 失败: ${result.failed_count}`;
+        if (result.skipped_count > 0) message += `, 跳过: ${result.skipped_count}`;
 
         toast.success(message);
         loadAccounts();
@@ -832,13 +952,205 @@ async function handleBatchCheckSubscription() {
     }
 }
 
+// ============== Sub2API 上传 ==============
+
+// 弹出 Sub2API 服务选择框，返回 Promise<{service_id: number|null}|null>
+// null 表示用户取消，{service_id: null} 表示自动选择
+function selectSub2ApiService() {
+    return new Promise(async (resolve) => {
+        const modal = document.getElementById('sub2api-service-modal');
+        const listEl = document.getElementById('sub2api-service-list');
+        const closeBtn = document.getElementById('close-sub2api-modal');
+        const cancelBtn = document.getElementById('cancel-sub2api-modal-btn');
+        const autoBtn = document.getElementById('sub2api-use-auto-btn');
+
+        listEl.innerHTML = '<div style="text-align:center;color:var(--text-muted)">加载中...</div>';
+        modal.classList.add('active');
+
+        let services = [];
+        try {
+            services = await api.get('/sub2api-services?enabled=true');
+        } catch (e) {
+            services = [];
+        }
+
+        if (services.length === 0) {
+            listEl.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:12px;">暂无已启用的 Sub2API 服务，将自动选择第一个</div>';
+        } else {
+            listEl.innerHTML = services.map(s => `
+                <div class="sub2api-service-item" data-id="${s.id}" style="
+                    padding: 10px 14px;
+                    border: 1px solid var(--border);
+                    border-radius: 8px;
+                    cursor: pointer;
+                    transition: background 0.15s;
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                ">
+                    <div>
+                        <div style="font-weight:500;">${escapeHtml(s.name)}</div>
+                        <div style="font-size:0.8rem;color:var(--text-muted);">${escapeHtml(s.api_url)}</div>
+                    </div>
+                    <span class="badge" style="background:var(--primary);color:#fff;font-size:0.7rem;padding:2px 8px;border-radius:10px;">选择</span>
+                </div>
+            `).join('');
+
+            listEl.querySelectorAll('.sub2api-service-item').forEach(item => {
+                item.addEventListener('mouseenter', () => item.style.background = 'var(--surface-hover)');
+                item.addEventListener('mouseleave', () => item.style.background = '');
+                item.addEventListener('click', () => {
+                    cleanup();
+                    resolve({ service_id: parseInt(item.dataset.id) });
+                });
+            });
+        }
+
+        function cleanup() {
+            modal.classList.remove('active');
+            closeBtn.removeEventListener('click', onCancel);
+            cancelBtn.removeEventListener('click', onCancel);
+            autoBtn.removeEventListener('click', onAuto);
+        }
+        function onCancel() { cleanup(); resolve(null); }
+        function onAuto() { cleanup(); resolve({ service_id: null }); }
+
+        closeBtn.addEventListener('click', onCancel);
+        cancelBtn.addEventListener('click', onCancel);
+        autoBtn.addEventListener('click', onAuto);
+    });
+}
+
+// 批量上传到 Sub2API
+async function handleBatchUploadSub2Api() {
+    const count = getEffectiveCount();
+    if (count === 0) return;
+
+    const choice = await selectSub2ApiService();
+    if (choice === null) return;  // 用户取消
+
+    const confirmed = await confirm(`确定要将选中的 ${count} 个账号上传到 Sub2API 吗？`);
+    if (!confirmed) return;
+
+    elements.batchUploadBtn.disabled = true;
+    elements.batchUploadBtn.textContent = '上传中...';
+
+    try {
+        const payload = buildBatchPayload();
+        if (choice.service_id != null) payload.service_id = choice.service_id;
+        const result = await api.post('/accounts/batch-upload-sub2api', payload);
+
+        let message = `成功: ${result.success_count}`;
+        if (result.failed_count > 0) message += `, 失败: ${result.failed_count}`;
+        if (result.skipped_count > 0) message += `, 跳过: ${result.skipped_count}`;
+
+        toast.success(message);
+        loadAccounts();
+    } catch (error) {
+        toast.error('批量上传失败: ' + error.message);
+    } finally {
+        updateBatchButtons();
+    }
+}
+
 // ============== Team Manager 上传 ==============
+
+// 上传单账号到 Sub2API
+async function uploadToSub2Api(id) {
+    const choice = await selectSub2ApiService();
+    if (choice === null) return;
+    try {
+        toast.info('正在上传到 Sub2API...');
+        const payload = {};
+        if (choice.service_id != null) payload.service_id = choice.service_id;
+        const result = await api.post(`/accounts/${id}/upload-sub2api`, payload);
+        if (result.success) {
+            toast.success('上传成功');
+            loadAccounts();
+        } else {
+            toast.error('上传失败: ' + (result.error || result.message || '未知错误'));
+        }
+    } catch (e) {
+        toast.error('上传失败: ' + e.message);
+    }
+}
+
+// 弹出 Team Manager 服务选择框，返回 Promise<{service_id: number|null}|null>
+// null 表示用户取消，{service_id: null} 表示自动选择
+function selectTmService() {
+    return new Promise(async (resolve) => {
+        const modal = document.getElementById('tm-service-modal');
+        const listEl = document.getElementById('tm-service-list');
+        const closeBtn = document.getElementById('close-tm-modal');
+        const cancelBtn = document.getElementById('cancel-tm-modal-btn');
+        const autoBtn = document.getElementById('tm-use-auto-btn');
+
+        listEl.innerHTML = '<div style="text-align:center;color:var(--text-muted)">加载中...</div>';
+        modal.classList.add('active');
+
+        let services = [];
+        try {
+            services = await api.get('/tm-services?enabled=true');
+        } catch (e) {
+            services = [];
+        }
+
+        if (services.length === 0) {
+            listEl.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:12px;">暂无已启用的 Team Manager 服务，将自动选择第一个</div>';
+        } else {
+            listEl.innerHTML = services.map(s => `
+                <div class="tm-service-item" data-id="${s.id}" style="
+                    padding: 10px 14px;
+                    border: 1px solid var(--border);
+                    border-radius: 8px;
+                    cursor: pointer;
+                    transition: background 0.15s;
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                ">
+                    <div>
+                        <div style="font-weight:500;">${escapeHtml(s.name)}</div>
+                        <div style="font-size:0.8rem;color:var(--text-muted);">${escapeHtml(s.api_url)}</div>
+                    </div>
+                    <span class="badge" style="background:var(--primary);color:#fff;font-size:0.7rem;padding:2px 8px;border-radius:10px;">选择</span>
+                </div>
+            `).join('');
+
+            listEl.querySelectorAll('.tm-service-item').forEach(item => {
+                item.addEventListener('mouseenter', () => item.style.background = 'var(--surface-hover)');
+                item.addEventListener('mouseleave', () => item.style.background = '');
+                item.addEventListener('click', () => {
+                    cleanup();
+                    resolve({ service_id: parseInt(item.dataset.id) });
+                });
+            });
+        }
+
+        function cleanup() {
+            modal.classList.remove('active');
+            closeBtn.removeEventListener('click', onCancel);
+            cancelBtn.removeEventListener('click', onCancel);
+            autoBtn.removeEventListener('click', onAuto);
+        }
+        function onCancel() { cleanup(); resolve(null); }
+        function onAuto() { cleanup(); resolve({ service_id: null }); }
+
+        closeBtn.addEventListener('click', onCancel);
+        cancelBtn.addEventListener('click', onCancel);
+        autoBtn.addEventListener('click', onAuto);
+    });
+}
 
 // 上传单账号到 Team Manager
 async function uploadToTm(id) {
+    const choice = await selectTmService();
+    if (choice === null) return;
     try {
         toast.info('正在上传到 Team Manager...');
-        const result = await api.post(`/payment/accounts/${id}/upload-tm`);
+        const payload = {};
+        if (choice.service_id != null) payload.service_id = choice.service_id;
+        const result = await api.post(`/accounts/${id}/upload-tm`, payload);
         if (result.success) {
             toast.success('上传成功');
         } else {
@@ -853,14 +1165,20 @@ async function uploadToTm(id) {
 async function handleBatchUploadTm() {
     const count = getEffectiveCount();
     if (count === 0) return;
+
+    const choice = await selectTmService();
+    if (choice === null) return;  // 用户取消
+
     const confirmed = await confirm(`确定要将选中的 ${count} 个账号上传到 Team Manager 吗？`);
     if (!confirmed) return;
 
-    elements.batchUploadTmBtn.disabled = true;
-    elements.batchUploadTmBtn.textContent = '上传中...';
+    elements.batchUploadBtn.disabled = true;
+    elements.batchUploadBtn.textContent = '上传中...';
 
     try {
-        const result = await api.post('/payment/accounts/batch-upload-tm', buildBatchPayload());
+        const payload = buildBatchPayload();
+        if (choice.service_id != null) payload.service_id = choice.service_id;
+        const result = await api.post('/accounts/batch-upload-tm', payload);
         let message = `成功: ${result.success_count}`;
         if (result.failed_count > 0) message += `, 失败: ${result.failed_count}`;
         if (result.skipped_count > 0) message += `, 跳过: ${result.skipped_count}`;
@@ -871,6 +1189,20 @@ async function handleBatchUploadTm() {
     } finally {
         updateBatchButtons();
     }
+}
+
+// 更多菜单切换
+function toggleMoreMenu(btn) {
+    const menu = btn.nextElementSibling;
+    const isActive = menu.classList.contains('active');
+    // 关闭所有其他更多菜单
+    document.querySelectorAll('.dropdown-menu.active').forEach(m => m.classList.remove('active'));
+    if (!isActive) menu.classList.add('active');
+}
+
+function closeMoreMenu(el) {
+    const menu = el.closest('.dropdown-menu');
+    if (menu) menu.classList.remove('active');
 }
 
 // 保存账号 Cookies

@@ -70,22 +70,32 @@ class RegistrationTaskCreate(BaseModel):
     email_service_type: str = "tempmail"
     proxy: Optional[str] = None
     email_service_config: Optional[dict] = None
-    email_service_id: Optional[int] = None  # 使用数据库中已配置的邮箱服务 ID
-    auto_upload_cpa: bool = False  # 注册成功后自动上传到 CPA
+    email_service_id: Optional[int] = None
+    auto_upload_cpa: bool = False
+    cpa_service_ids: List[int] = []  # 指定 CPA 服务 ID 列表，空则取第一个启用的
+    auto_upload_sub2api: bool = False
+    sub2api_service_ids: List[int] = []  # 指定 Sub2API 服务 ID 列表
+    auto_upload_tm: bool = False
+    tm_service_ids: List[int] = []  # 指定 TM 服务 ID 列表
 
 
 class BatchRegistrationRequest(BaseModel):
     """批量注册请求"""
-    count: int = 1  # 注册数量
+    count: int = 1
     email_service_type: str = "tempmail"
     proxy: Optional[str] = None
     email_service_config: Optional[dict] = None
-    email_service_id: Optional[int] = None  # 使用数据库中已配置的邮箱服务 ID
-    interval_min: int = 5  # 最小间隔秒数
-    interval_max: int = 30  # 最大间隔秒数
-    concurrency: int = 1   # 并发线程数 (1-50)
-    mode: str = "pipeline"  # 执行模式: "parallel" 或 "pipeline"
-    auto_upload_cpa: bool = False  # 注册成功后自动上传到 CPA
+    email_service_id: Optional[int] = None
+    interval_min: int = 5
+    interval_max: int = 30
+    concurrency: int = 1
+    mode: str = "pipeline"
+    auto_upload_cpa: bool = False
+    cpa_service_ids: List[int] = []
+    auto_upload_sub2api: bool = False
+    sub2api_service_ids: List[int] = []
+    auto_upload_tm: bool = False
+    tm_service_ids: List[int] = []
 
 
 class RegistrationTaskResponse(BaseModel):
@@ -141,14 +151,19 @@ class OutlookAccountsListResponse(BaseModel):
 
 class OutlookBatchRegistrationRequest(BaseModel):
     """Outlook 批量注册请求"""
-    service_ids: List[int]       # 选中的 EmailService ID
-    skip_registered: bool = True  # 自动跳过已注册邮箱
+    service_ids: List[int]
+    skip_registered: bool = True
     proxy: Optional[str] = None
     interval_min: int = 5
     interval_max: int = 30
-    concurrency: int = 1   # 并发线程数 (1-50)
-    mode: str = "pipeline"  # 执行模式: "parallel" 或 "pipeline"
-    auto_upload_cpa: bool = False  # 注册成功后自动上传到 CPA
+    concurrency: int = 1
+    mode: str = "pipeline"
+    auto_upload_cpa: bool = False
+    cpa_service_ids: List[int] = []
+    auto_upload_sub2api: bool = False
+    sub2api_service_ids: List[int] = []
+    auto_upload_tm: bool = False
+    tm_service_ids: List[int] = []
 
 
 class OutlookBatchRegistrationResponse(BaseModel):
@@ -179,7 +194,34 @@ def task_to_response(task: RegistrationTask) -> RegistrationTaskResponse:
     )
 
 
-def _run_sync_registration_task(task_uuid: str, email_service_type: str, proxy: Optional[str], email_service_config: Optional[dict], email_service_id: Optional[int] = None, log_prefix: str = "", batch_id: str = "", auto_upload_cpa: bool = False):
+def _normalize_email_service_config(
+    service_type: EmailServiceType,
+    config: Optional[dict],
+    proxy_url: Optional[str] = None
+) -> dict:
+    """按服务类型兼容旧字段名，避免不同服务的配置键互相污染。"""
+    normalized = config.copy() if config else {}
+
+    if 'api_url' in normalized and 'base_url' not in normalized:
+        normalized['base_url'] = normalized.pop('api_url')
+
+    if service_type == EmailServiceType.CUSTOM_DOMAIN:
+        if 'domain' in normalized and 'default_domain' not in normalized:
+            normalized['default_domain'] = normalized.pop('domain')
+    elif service_type in (EmailServiceType.TEMP_MAIL, EmailServiceType.FREEMAIL):
+        if 'default_domain' in normalized and 'domain' not in normalized:
+            normalized['domain'] = normalized.pop('default_domain')
+    elif service_type == EmailServiceType.DUCK_MAIL:
+        if 'domain' in normalized and 'default_domain' not in normalized:
+            normalized['default_domain'] = normalized.pop('domain')
+
+    if proxy_url and 'proxy_url' not in normalized:
+        normalized['proxy_url'] = proxy_url
+
+    return normalized
+
+
+def _run_sync_registration_task(task_uuid: str, email_service_type: str, proxy: Optional[str], email_service_config: Optional[dict], email_service_id: Optional[int] = None, log_prefix: str = "", batch_id: str = "", auto_upload_cpa: bool = False, cpa_service_ids: List[int] = None, auto_upload_sub2api: bool = False, sub2api_service_ids: List[int] = None, auto_upload_tm: bool = False, tm_service_ids: List[int] = None):
     """
     在线程池中执行的同步注册任务
 
@@ -233,15 +275,11 @@ def _run_sync_registration_task(task_uuid: str, email_service_type: str, proxy: 
                 ).first()
 
                 if db_service:
-                    config = db_service.config.copy() if db_service.config else {}
-                    # 兼容旧版字段名 api_url -> base_url
-                    if 'api_url' in config and 'base_url' not in config:
-                        config['base_url'] = config.pop('api_url')
-                    if 'domain' in config and 'default_domain' not in config:
-                        config['default_domain'] = config.pop('domain')
+                    service_type = EmailServiceType(db_service.service_type)
+                    config = _normalize_email_service_config(service_type, db_service.config, actual_proxy_url)
                     # 更新任务关联的邮箱服务
                     crud.update_registration_task(db, task_uuid, email_service_id=db_service.id)
-                    logger.info(f"使用数据库邮箱服务: {db_service.name} (ID: {db_service.id})")
+                    logger.info(f"使用数据库邮箱服务: {db_service.name} (ID: {db_service.id}, 类型: {service_type.value})")
                 else:
                     raise ValueError(f"邮箱服务不存在或已禁用: {email_service_id}")
             else:
@@ -262,12 +300,7 @@ def _run_sync_registration_task(task_uuid: str, email_service_type: str, proxy: 
                     ).order_by(EmailServiceModel.priority.asc()).first()
 
                     if db_service and db_service.config:
-                        config = db_service.config.copy()
-                        # 兼容旧版字段名 api_url -> base_url
-                        if 'api_url' in config and 'base_url' not in config:
-                            config['base_url'] = config.pop('api_url')
-                        if 'domain' in config and 'default_domain' not in config:
-                            config['default_domain'] = config.pop('domain')
+                        config = _normalize_email_service_config(service_type, db_service.config, actual_proxy_url)
                         crud.update_registration_task(db, task_uuid, email_service_id=db_service.id)
                         logger.info(f"使用数据库自定义域名服务: {db_service.name}")
                     elif settings.custom_domain_base_url and settings.custom_domain_api_key:
@@ -311,6 +344,34 @@ def _run_sync_registration_task(task_uuid: str, email_service_type: str, proxy: 
                         logger.info(f"使用数据库 Outlook 账户: {selected_service.name}")
                     else:
                         raise ValueError("所有 Outlook 账户都已注册过 OpenAI 账号，请添加新的 Outlook 账户")
+                elif service_type == EmailServiceType.DUCK_MAIL:
+                    from ...database.models import EmailService as EmailServiceModel
+
+                    db_service = db.query(EmailServiceModel).filter(
+                        EmailServiceModel.service_type == "duck_mail",
+                        EmailServiceModel.enabled == True
+                    ).order_by(EmailServiceModel.priority.asc()).first()
+
+                    if db_service and db_service.config:
+                        config = _normalize_email_service_config(service_type, db_service.config, actual_proxy_url)
+                        crud.update_registration_task(db, task_uuid, email_service_id=db_service.id)
+                        logger.info(f"使用数据库 DuckMail 服务: {db_service.name}")
+                    else:
+                        raise ValueError("没有可用的 DuckMail 邮箱服务，请先在邮箱服务页面添加服务")
+                elif service_type == EmailServiceType.FREEMAIL:
+                    from ...database.models import EmailService as EmailServiceModel
+
+                    db_service = db.query(EmailServiceModel).filter(
+                        EmailServiceModel.service_type == "freemail",
+                        EmailServiceModel.enabled == True
+                    ).order_by(EmailServiceModel.priority.asc()).first()
+
+                    if db_service and db_service.config:
+                        config = _normalize_email_service_config(service_type, db_service.config, actual_proxy_url)
+                        crud.update_registration_task(db, task_uuid, email_service_id=db_service.id)
+                        logger.info(f"使用数据库 Freemail 服务: {db_service.name}")
+                    else:
+                        raise ValueError("没有可用的 Freemail 邮箱服务，请先在邮箱服务页面添加服务")
                 else:
                     config = email_service_config or {}
 
@@ -336,24 +397,88 @@ def _run_sync_registration_task(task_uuid: str, email_service_type: str, proxy: 
                 # 保存到数据库
                 engine.save_to_database(result)
 
-                # 自动上传到 CPA
+                # 自动上传到 CPA（可多服务）
                 if auto_upload_cpa:
                     try:
-                        from ...core.cpa_upload import upload_to_cpa, generate_token_json
+                        from ...core.upload.cpa_upload import upload_to_cpa, generate_token_json
                         from ...database.models import Account as AccountModel
                         saved_account = db.query(AccountModel).filter_by(email=result.email).first()
                         if saved_account and saved_account.access_token:
                             token_data = generate_token_json(saved_account)
-                            cpa_success, cpa_msg = upload_to_cpa(token_data)
-                            if cpa_success:
-                                saved_account.cpa_uploaded = True
-                                saved_account.cpa_uploaded_at = datetime.utcnow()
-                                db.commit()
-                                log_callback(f"[CPA] 已自动上传到 CPA: {result.email}")
-                            else:
-                                log_callback(f"[CPA] 上传失败: {cpa_msg}")
+                            _cpa_ids = cpa_service_ids or []
+                            if not _cpa_ids:
+                                # 未指定则取所有启用的服务
+                                _cpa_ids = [s.id for s in crud.get_cpa_services(db, enabled=True)]
+                            if not _cpa_ids:
+                                log_callback("[CPA] 无可用 CPA 服务，跳过上传")
+                            for _sid in _cpa_ids:
+                                try:
+                                    _svc = crud.get_cpa_service_by_id(db, _sid)
+                                    if not _svc:
+                                        continue
+                                    log_callback(f"[CPA] 上传到服务: {_svc.name}")
+                                    _ok, _msg = upload_to_cpa(token_data, api_url=_svc.api_url, api_token=_svc.api_token)
+                                    if _ok:
+                                        saved_account.cpa_uploaded = True
+                                        saved_account.cpa_uploaded_at = datetime.utcnow()
+                                        db.commit()
+                                        log_callback(f"[CPA] 上传成功: {_svc.name}")
+                                    else:
+                                        log_callback(f"[CPA] 上传失败({_svc.name}): {_msg}")
+                                except Exception as _e:
+                                    log_callback(f"[CPA] 异常({_sid}): {_e}")
                     except Exception as cpa_err:
                         log_callback(f"[CPA] 上传异常: {cpa_err}")
+
+                # 自动上传到 Sub2API（可多服务）
+                if auto_upload_sub2api:
+                    try:
+                        from ...core.upload.sub2api_upload import upload_to_sub2api
+                        from ...database.models import Account as AccountModel
+                        saved_account = db.query(AccountModel).filter_by(email=result.email).first()
+                        if saved_account and saved_account.access_token:
+                            _s2a_ids = sub2api_service_ids or []
+                            if not _s2a_ids:
+                                _s2a_ids = [s.id for s in crud.get_sub2api_services(db, enabled=True)]
+                            if not _s2a_ids:
+                                log_callback("[Sub2API] 无可用 Sub2API 服务，跳过上传")
+                            for _sid in _s2a_ids:
+                                try:
+                                    _svc = crud.get_sub2api_service_by_id(db, _sid)
+                                    if not _svc:
+                                        continue
+                                    log_callback(f"[Sub2API] 上传到服务: {_svc.name}")
+                                    _ok, _msg = upload_to_sub2api([saved_account], _svc.api_url, _svc.api_key)
+                                    log_callback(f"[Sub2API] {'成功' if _ok else '失败'}({_svc.name}): {_msg}")
+                                except Exception as _e:
+                                    log_callback(f"[Sub2API] 异常({_sid}): {_e}")
+                    except Exception as s2a_err:
+                        log_callback(f"[Sub2API] 上传异常: {s2a_err}")
+
+                # 自动上传到 Team Manager（可多服务）
+                if auto_upload_tm:
+                    try:
+                        from ...core.upload.team_manager_upload import upload_to_team_manager
+                        from ...database.models import Account as AccountModel
+                        saved_account = db.query(AccountModel).filter_by(email=result.email).first()
+                        if saved_account and saved_account.access_token:
+                            _tm_ids = tm_service_ids or []
+                            if not _tm_ids:
+                                _tm_ids = [s.id for s in crud.get_tm_services(db, enabled=True)]
+                            if not _tm_ids:
+                                log_callback("[TM] 无可用 Team Manager 服务，跳过上传")
+                            for _sid in _tm_ids:
+                                try:
+                                    _svc = crud.get_tm_service_by_id(db, _sid)
+                                    if not _svc:
+                                        continue
+                                    log_callback(f"[TM] 上传到服务: {_svc.name}")
+                                    _ok, _msg = upload_to_team_manager(saved_account, _svc.api_url, _svc.api_key)
+                                    log_callback(f"[TM] {'成功' if _ok else '失败'}({_svc.name}): {_msg}")
+                                except Exception as _e:
+                                    log_callback(f"[TM] 异常({_sid}): {_e}")
+                    except Exception as tm_err:
+                        log_callback(f"[TM] 上传异常: {tm_err}")
 
                 # 更新任务状态
                 crud.update_registration_task(
@@ -399,7 +524,7 @@ def _run_sync_registration_task(task_uuid: str, email_service_type: str, proxy: 
                 pass
 
 
-async def run_registration_task(task_uuid: str, email_service_type: str, proxy: Optional[str], email_service_config: Optional[dict], email_service_id: Optional[int] = None, log_prefix: str = "", batch_id: str = "", auto_upload_cpa: bool = False):
+async def run_registration_task(task_uuid: str, email_service_type: str, proxy: Optional[str], email_service_config: Optional[dict], email_service_id: Optional[int] = None, log_prefix: str = "", batch_id: str = "", auto_upload_cpa: bool = False, cpa_service_ids: List[int] = None, auto_upload_sub2api: bool = False, sub2api_service_ids: List[int] = None, auto_upload_tm: bool = False, tm_service_ids: List[int] = None):
     """
     异步执行注册任务
 
@@ -426,7 +551,12 @@ async def run_registration_task(task_uuid: str, email_service_type: str, proxy: 
             email_service_id,
             log_prefix,
             batch_id,
-            auto_upload_cpa
+            auto_upload_cpa,
+            cpa_service_ids or [],
+            auto_upload_sub2api,
+            sub2api_service_ids or [],
+            auto_upload_tm,
+            tm_service_ids or [],
         )
     except Exception as e:
         logger.error(f"线程池执行异常: {task_uuid}, 错误: {e}")
@@ -473,7 +603,12 @@ async def run_batch_parallel(
     email_service_config: Optional[dict],
     email_service_id: Optional[int],
     concurrency: int,
-    auto_upload_cpa: bool = False
+    auto_upload_cpa: bool = False,
+    cpa_service_ids: List[int] = None,
+    auto_upload_sub2api: bool = False,
+    sub2api_service_ids: List[int] = None,
+    auto_upload_tm: bool = False,
+    tm_service_ids: List[int] = None,
 ):
     """
     并行模式：所有任务同时提交，Semaphore 控制最大并发数
@@ -489,7 +624,10 @@ async def run_batch_parallel(
         async with semaphore:
             await run_registration_task(
                 uuid, email_service_type, proxy, email_service_config, email_service_id,
-                log_prefix=prefix, batch_id=batch_id, auto_upload_cpa=auto_upload_cpa
+                log_prefix=prefix, batch_id=batch_id,
+                auto_upload_cpa=auto_upload_cpa, cpa_service_ids=cpa_service_ids or [],
+                auto_upload_sub2api=auto_upload_sub2api, sub2api_service_ids=sub2api_service_ids or [],
+                auto_upload_tm=auto_upload_tm, tm_service_ids=tm_service_ids or [],
             )
         with get_db() as db:
             t = crud.get_registration_task(db, uuid)
@@ -531,7 +669,12 @@ async def run_batch_pipeline(
     interval_min: int,
     interval_max: int,
     concurrency: int,
-    auto_upload_cpa: bool = False
+    auto_upload_cpa: bool = False,
+    cpa_service_ids: List[int] = None,
+    auto_upload_sub2api: bool = False,
+    sub2api_service_ids: List[int] = None,
+    auto_upload_tm: bool = False,
+    tm_service_ids: List[int] = None,
 ):
     """
     流水线模式：每隔 interval 秒启动一个新任务，Semaphore 限制最大并发数
@@ -547,7 +690,10 @@ async def run_batch_pipeline(
         try:
             await run_registration_task(
                 uuid, email_service_type, proxy, email_service_config, email_service_id,
-                log_prefix=pfx, batch_id=batch_id, auto_upload_cpa=auto_upload_cpa
+                log_prefix=pfx, batch_id=batch_id,
+                auto_upload_cpa=auto_upload_cpa, cpa_service_ids=cpa_service_ids or [],
+                auto_upload_sub2api=auto_upload_sub2api, sub2api_service_ids=sub2api_service_ids or [],
+                auto_upload_tm=auto_upload_tm, tm_service_ids=tm_service_ids or [],
             )
             with get_db() as db:
                 t = crud.get_registration_task(db, uuid)
@@ -613,21 +759,30 @@ async def run_batch_registration(
     interval_max: int,
     concurrency: int = 1,
     mode: str = "pipeline",
-    auto_upload_cpa: bool = False
+    auto_upload_cpa: bool = False,
+    cpa_service_ids: List[int] = None,
+    auto_upload_sub2api: bool = False,
+    sub2api_service_ids: List[int] = None,
+    auto_upload_tm: bool = False,
+    tm_service_ids: List[int] = None,
 ):
     """根据 mode 分发到并行或流水线执行"""
     if mode == "parallel":
         await run_batch_parallel(
             batch_id, task_uuids, email_service_type, proxy,
             email_service_config, email_service_id, concurrency,
-            auto_upload_cpa=auto_upload_cpa
+            auto_upload_cpa=auto_upload_cpa, cpa_service_ids=cpa_service_ids,
+            auto_upload_sub2api=auto_upload_sub2api, sub2api_service_ids=sub2api_service_ids,
+            auto_upload_tm=auto_upload_tm, tm_service_ids=tm_service_ids,
         )
     else:
         await run_batch_pipeline(
             batch_id, task_uuids, email_service_type, proxy,
             email_service_config, email_service_id,
             interval_min, interval_max, concurrency,
-            auto_upload_cpa=auto_upload_cpa
+            auto_upload_cpa=auto_upload_cpa, cpa_service_ids=cpa_service_ids,
+            auto_upload_sub2api=auto_upload_sub2api, sub2api_service_ids=sub2api_service_ids,
+            auto_upload_tm=auto_upload_tm, tm_service_ids=tm_service_ids,
         )
 
 
@@ -674,7 +829,12 @@ async def start_registration(
         request.email_service_id,
         "",
         "",
-        request.auto_upload_cpa
+        request.auto_upload_cpa,
+        request.cpa_service_ids,
+        request.auto_upload_sub2api,
+        request.sub2api_service_ids,
+        request.auto_upload_tm,
+        request.tm_service_ids,
     )
 
     return task_to_response(task)
@@ -746,7 +906,12 @@ async def start_batch_registration(
         request.interval_max,
         request.concurrency,
         request.mode,
-        request.auto_upload_cpa
+        request.auto_upload_cpa,
+        request.cpa_service_ids,
+        request.auto_upload_sub2api,
+        request.sub2api_service_ids,
+        request.auto_upload_tm,
+        request.tm_service_ids,
     )
 
     return BatchRegistrationResponse(
@@ -935,6 +1100,16 @@ async def get_available_email_services():
             "available": False,
             "count": 0,
             "services": []
+        },
+        "duck_mail": {
+            "available": False,
+            "count": 0,
+            "services": []
+        },
+        "freemail": {
+            "available": False,
+            "count": 0,
+            "services": []
         }
     }
 
@@ -1008,6 +1183,42 @@ async def get_available_email_services():
         result["temp_mail"]["count"] = len(temp_mail_services)
         result["temp_mail"]["available"] = len(temp_mail_services) > 0
 
+        duck_mail_services = db.query(EmailServiceModel).filter(
+            EmailServiceModel.service_type == "duck_mail",
+            EmailServiceModel.enabled == True
+        ).order_by(EmailServiceModel.priority.asc()).all()
+
+        for service in duck_mail_services:
+            config = service.config or {}
+            result["duck_mail"]["services"].append({
+                "id": service.id,
+                "name": service.name,
+                "type": "duck_mail",
+                "default_domain": config.get("default_domain"),
+                "priority": service.priority
+            })
+
+        result["duck_mail"]["count"] = len(duck_mail_services)
+        result["duck_mail"]["available"] = len(duck_mail_services) > 0
+
+        freemail_services = db.query(EmailServiceModel).filter(
+            EmailServiceModel.service_type == "freemail",
+            EmailServiceModel.enabled == True
+        ).order_by(EmailServiceModel.priority.asc()).all()
+
+        for service in freemail_services:
+            config = service.config or {}
+            result["freemail"]["services"].append({
+                "id": service.id,
+                "name": service.name,
+                "type": "freemail",
+                "domain": config.get("domain"),
+                "priority": service.priority
+            })
+
+        result["freemail"]["count"] = len(freemail_services)
+        result["freemail"]["available"] = len(freemail_services) > 0
+
     return result
 
 
@@ -1075,7 +1286,12 @@ async def run_outlook_batch_registration(
     interval_max: int,
     concurrency: int = 1,
     mode: str = "pipeline",
-    auto_upload_cpa: bool = False
+    auto_upload_cpa: bool = False,
+    cpa_service_ids: List[int] = None,
+    auto_upload_sub2api: bool = False,
+    sub2api_service_ids: List[int] = None,
+    auto_upload_tm: bool = False,
+    tm_service_ids: List[int] = None,
 ):
     """
     异步执行 Outlook 批量注册任务，复用通用并发逻辑
@@ -1113,7 +1329,12 @@ async def run_outlook_batch_registration(
         interval_max=interval_max,
         concurrency=concurrency,
         mode=mode,
-        auto_upload_cpa=auto_upload_cpa
+        auto_upload_cpa=auto_upload_cpa,
+        cpa_service_ids=cpa_service_ids,
+        auto_upload_sub2api=auto_upload_sub2api,
+        sub2api_service_ids=sub2api_service_ids,
+        auto_upload_tm=auto_upload_tm,
+        tm_service_ids=tm_service_ids,
     )
 
 
@@ -1212,7 +1433,12 @@ async def start_outlook_batch_registration(
         request.interval_max,
         request.concurrency,
         request.mode,
-        request.auto_upload_cpa
+        request.auto_upload_cpa,
+        request.cpa_service_ids,
+        request.auto_upload_sub2api,
+        request.sub2api_service_ids,
+        request.auto_upload_tm,
+        request.tm_service_ids,
     )
 
     return OutlookBatchRegistrationResponse(

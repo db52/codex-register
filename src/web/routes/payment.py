@@ -11,17 +11,14 @@ from pydantic import BaseModel
 
 from ...database.session import get_db
 from ...database.models import Account
+from ...database import crud
 from ...config.settings import get_settings
 from .accounts import resolve_account_ids
-from ...core.payment import (
+from ...core.openai.payment import (
     generate_plus_link,
     generate_team_link,
     open_url_incognito,
     check_subscription_status,
-)
-from ...core.team_manager import (
-    upload_to_team_manager,
-    batch_upload_to_team_manager,
 )
 
 logger = logging.getLogger(__name__)
@@ -53,18 +50,6 @@ class MarkSubscriptionRequest(BaseModel):
 class BatchCheckSubscriptionRequest(BaseModel):
     ids: List[int] = []
     proxy: Optional[str] = None
-    select_all: bool = False
-    status_filter: Optional[str] = None
-    email_service_filter: Optional[str] = None
-    search_filter: Optional[str] = None
-
-
-class UploadTMRequest(BaseModel):
-    proxy: Optional[str] = None  # 保留，TM 上传不走代理
-
-
-class BatchUploadTMRequest(BaseModel):
-    ids: List[int] = []
     select_all: bool = False
     status_filter: Optional[str] = None
     email_service_filter: Optional[str] = None
@@ -137,25 +122,6 @@ def open_browser_incognito(request: OpenIncognitoRequest):
 
 # ============== 订阅状态 ==============
 
-@router.post("/accounts/{account_id}/mark-subscription")
-def mark_subscription(account_id: int, request: MarkSubscriptionRequest):
-    """手动标记账号订阅类型"""
-    allowed = ("free", "plus", "team")
-    if request.subscription_type not in allowed:
-        raise HTTPException(status_code=400, detail=f"subscription_type 必须为 {allowed}")
-
-    with get_db() as db:
-        account = db.query(Account).filter(Account.id == account_id).first()
-        if not account:
-            raise HTTPException(status_code=404, detail="账号不存在")
-
-        account.subscription_type = None if request.subscription_type == "free" else request.subscription_type
-        account.subscription_at = datetime.utcnow() if request.subscription_type != "free" else None
-        db.commit()
-
-    return {"success": True, "subscription_type": request.subscription_type}
-
-
 @router.post("/accounts/batch-check-subscription")
 def batch_check_subscription(request: BatchCheckSubscriptionRequest):
     """批量检测账号订阅状态"""
@@ -195,42 +161,22 @@ def batch_check_subscription(request: BatchCheckSubscriptionRequest):
     return results
 
 
-# ============== Team Manager 上传 ==============
-
-@router.post("/accounts/{account_id}/upload-tm")
-def upload_account_tm(account_id: int, request: UploadTMRequest = None):
-    """上传单账号到 Team Manager"""
-    settings = get_settings()
-    if not settings.tm_enabled:
-        raise HTTPException(status_code=400, detail="Team Manager 上传未启用")
-
-    api_url = settings.tm_api_url
-    api_key = settings.tm_api_key.get_secret_value() if settings.tm_api_key else ""
+@router.post("/accounts/{account_id}/mark-subscription")
+def mark_subscription(account_id: int, request: MarkSubscriptionRequest):
+    """手动标记账号订阅类型"""
+    allowed = ("free", "plus", "team")
+    if request.subscription_type not in allowed:
+        raise HTTPException(status_code=400, detail=f"subscription_type 必须为 {allowed}")
 
     with get_db() as db:
         account = db.query(Account).filter(Account.id == account_id).first()
         if not account:
             raise HTTPException(status_code=404, detail="账号不存在")
-        success, message = upload_to_team_manager(account, api_url, api_key)
 
-    return {"success": success, "message": message}
+        account.subscription_type = None if request.subscription_type == "free" else request.subscription_type
+        account.subscription_at = datetime.utcnow() if request.subscription_type != "free" else None
+        db.commit()
+
+    return {"success": True, "subscription_type": request.subscription_type}
 
 
-@router.post("/accounts/batch-upload-tm")
-def batch_upload_tm(request: BatchUploadTMRequest):
-    """批量上传账号到 Team Manager"""
-    settings = get_settings()
-    if not settings.tm_enabled:
-        raise HTTPException(status_code=400, detail="Team Manager 上传未启用")
-
-    api_url = settings.tm_api_url
-    api_key = settings.tm_api_key.get_secret_value() if settings.tm_api_key else ""
-
-    with get_db() as db:
-        ids = resolve_account_ids(
-            db, request.ids, request.select_all,
-            request.status_filter, request.email_service_filter, request.search_filter
-        )
-
-    results = batch_upload_to_team_manager(ids, api_url, api_key)
-    return results

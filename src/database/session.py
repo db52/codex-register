@@ -110,7 +110,11 @@ class DatabaseSessionManager:
             ("accounts", "subscription_type", "VARCHAR(20)"),
             ("accounts", "subscription_at", "DATETIME"),
             ("accounts", "cookies", "TEXT"),
+            ("proxies", "is_default", "BOOLEAN DEFAULT 0"),
         ]
+
+        # 确保新表存在（create_tables 已处理，此处兜底）
+        Base.metadata.create_all(bind=self.engine)
 
         with self.engine.connect() as conn:
             for table_name, column_name, column_type in migrations:

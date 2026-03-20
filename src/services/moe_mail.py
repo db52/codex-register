@@ -18,7 +18,7 @@ from ..config.constants import OTP_CODE_PATTERN
 logger = logging.getLogger(__name__)
 
 
-class CustomDomainEmailService(BaseEmailService):
+class MeoMailEmailService(BaseEmailService):
     """
     自定义域名邮箱服务
     基于 REST API 接口

@@ -35,6 +35,8 @@ class EmailServiceType(str, Enum):
     OUTLOOK = "outlook"
     CUSTOM_DOMAIN = "custom_domain"
     TEMP_MAIL = "temp_mail"
+    DUCK_MAIL = "duck_mail"
+    FREEMAIL = "freemail"
 
 
 # ============================================================================
@@ -110,6 +112,20 @@ EMAIL_SERVICE_DEFAULTS = {
     "custom_domain": {
         "base_url": "",  # 需要用户配置
         "api_key_header": "X-API-Key",
+        "timeout": 30,
+        "max_retries": 3,
+    },
+    "duck_mail": {
+        "base_url": "",
+        "default_domain": "",
+        "password_length": 12,
+        "timeout": 30,
+        "max_retries": 3,
+    },
+    "freemail": {
+        "base_url": "",
+        "admin_token": "",
+        "domain": "",
         "timeout": 30,
         "max_retries": 3,
     }

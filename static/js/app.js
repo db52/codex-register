@@ -26,6 +26,8 @@ let availableServices = {
     duck_mail: { available: false, services: [] },
     freemail: { available: false, services: [] }
 };
+const EXECUTION_MODE_STORAGE_KEY = 'registrationExecutionMode';
+const ENABLED_EXECUTION_MODE = 'curl_cffi';
 
 // WebSocket 相关变量
 let webSocket = null;
@@ -40,6 +42,7 @@ let activeBatchId = null;    // 当前活跃的批量任务 ID（用于页面重
 const elements = {
     form: document.getElementById('registration-form'),
     emailService: document.getElementById('email-service'),
+    executionMode: document.getElementById('execution-mode'),
     regMode: document.getElementById('reg-mode'),
     regModeGroup: document.getElementById('reg-mode-group'),
     batchCountGroup: document.getElementById('batch-count-group'),
@@ -99,6 +102,7 @@ const elements = {
 // 初始化
 document.addEventListener('DOMContentLoaded', () => {
     initEventListeners();
+    restoreExecutionMode();
     loadAvailableServices();
     loadRecentAccounts();
     startAccountsPolling();
@@ -196,6 +200,10 @@ function initEventListeners() {
     // 邮箱服务切换
     elements.emailService.addEventListener('change', handleServiceChange);
 
+    if (elements.executionMode) {
+        elements.executionMode.addEventListener('change', handleExecutionModeChange);
+    }
+
     // 取消按钮
     elements.cancelBtn.addEventListener('click', handleCancelTask);
 
@@ -218,6 +226,28 @@ function initEventListeners() {
     elements.outlookConcurrencyMode.addEventListener('change', () => {
         handleConcurrencyModeChange(elements.outlookConcurrencyMode, elements.outlookConcurrencyHint, elements.outlookIntervalGroup);
     });
+}
+
+function restoreExecutionMode() {
+    if (!elements.executionMode) return;
+    const savedMode = localStorage.getItem(EXECUTION_MODE_STORAGE_KEY);
+    const normalizedMode = savedMode === ENABLED_EXECUTION_MODE ? savedMode : ENABLED_EXECUTION_MODE;
+    elements.executionMode.value = normalizedMode;
+    localStorage.setItem(EXECUTION_MODE_STORAGE_KEY, normalizedMode);
+}
+
+function handleExecutionModeChange(e) {
+    const normalizedMode = e.target.value === ENABLED_EXECUTION_MODE ? e.target.value : ENABLED_EXECUTION_MODE;
+    e.target.value = normalizedMode;
+    localStorage.setItem(EXECUTION_MODE_STORAGE_KEY, normalizedMode);
+}
+
+function getCurrentExecutionMode() {
+    return elements.executionMode ? (elements.executionMode.value || ENABLED_EXECUTION_MODE) : ENABLED_EXECUTION_MODE;
+}
+
+function getExecutionModeFailureHint() {
+    return '';
 }
 
 // 加载可用的邮箱服务
@@ -463,6 +493,7 @@ async function handleStartRegistration(e) {
     }
 
     const [emailServiceType, serviceId] = selectedValue.split(':');
+    const executionMode = getCurrentExecutionMode();
 
     // 禁用开始按钮
     elements.startBtn.disabled = true;
@@ -474,6 +505,7 @@ async function handleStartRegistration(e) {
     // 构建请求数据（代理从设置中自动获取）
     const requestData = {
         email_service_type: emailServiceType,
+        execution_mode: executionMode,
         auto_upload_cpa: elements.autoUploadCpa ? elements.autoUploadCpa.checked : false,
         cpa_service_ids: elements.autoUploadCpa && elements.autoUploadCpa.checked ? getSelectedServiceIds(elements.cpaServiceSelect) : [],
         auto_upload_sub2api: elements.autoUploadSub2api ? elements.autoUploadSub2api.checked : false,
@@ -486,6 +518,8 @@ async function handleStartRegistration(e) {
     if (serviceId && serviceId !== 'default') {
         requestData.email_service_id = parseInt(serviceId);
     }
+
+    addLog('info', `[系统] 执行方式: ${executionMode}`);
 
     if (isBatchMode) {
         await handleBatchRegistration(requestData);
@@ -520,7 +554,7 @@ async function handleSingleRegistration(requestData) {
 
     } catch (error) {
         addLog('error', `[错误] 启动失败: ${error.message}`);
-        toast.error(error.message);
+        toast.error(error.message + getExecutionModeFailureHint());
         resetButtons();
     }
 }
@@ -794,8 +828,8 @@ function startLogPolling(taskUuid) {
                         // 刷新账号列表
                         loadRecentAccounts();
                     } else if (data.status === 'failed') {
-                        addLog('error', '[错误] 注册失败');
-                        toast.error('注册失败');
+                        addLog('error', `[错误] 注册失败${getExecutionModeFailureHint()}`);
+                        toast.error(`注册失败${getExecutionModeFailureHint()}`);
                     } else if (data.status === 'cancelled') {
                         addLog('warning', '[警告] 任务已取消');
                     }
@@ -836,7 +870,7 @@ function startBatchPolling(batchId) {
                         // 刷新账号列表
                         loadRecentAccounts();
                     } else {
-                        toast.warning('批量注册完成，但没有成功注册任何账号');
+                        toast.warning(`批量注册完成，但没有成功注册任何账号${getExecutionModeFailureHint()}`);
                     }
                 }
             }
@@ -1179,6 +1213,7 @@ async function handleOutlookBatchRegistration() {
 
     const requestData = {
         service_ids: selectedIds,
+        execution_mode: getCurrentExecutionMode(),
         skip_registered: skipRegistered,
         interval_min: intervalMin,
         interval_max: intervalMax,
@@ -1192,6 +1227,7 @@ async function handleOutlookBatchRegistration() {
         tm_service_ids: elements.autoUploadTm && elements.autoUploadTm.checked ? getSelectedServiceIds(elements.tmServiceSelect) : [],
     };
 
+    addLog('info', `[系统] 执行方式: ${requestData.execution_mode}`);
     addLog('info', `[系统] 正在启动 Outlook 批量注册 (${selectedIds.length} 个账户)...`);
 
     try {
@@ -1219,7 +1255,7 @@ async function handleOutlookBatchRegistration() {
 
     } catch (error) {
         addLog('error', `[错误] 启动失败: ${error.message}`);
-        toast.error(error.message);
+        toast.error(error.message + getExecutionModeFailureHint());
         resetButtons();
     }
 }
@@ -1280,11 +1316,11 @@ function connectBatchWebSocket(batchId) {
                                 toast.success(`Outlook 批量注册完成，成功 ${data.success} 个`);
                                 loadRecentAccounts();
                             } else {
-                                toast.warning('Outlook 批量注册完成，但没有成功注册任何账号');
+                                toast.warning(`Outlook 批量注册完成，但没有成功注册任何账号${getExecutionModeFailureHint()}`);
                             }
                         } else if (data.status === 'failed') {
                             addLog('error', '[错误] 批量任务执行失败');
-                            toast.error('批量任务执行失败');
+                            toast.error(`批量任务执行失败${getExecutionModeFailureHint()}`);
                         } else if (data.status === 'cancelled' || data.status === 'cancelling') {
                             addLog('warning', '[警告] 批量任务已取消');
                         }
@@ -1395,7 +1431,7 @@ function startOutlookBatchPolling(batchId) {
                         toast.success(`Outlook 批量注册完成，成功 ${data.success} 个`);
                         loadRecentAccounts();
                     } else {
-                        toast.warning('Outlook 批量注册完成，但没有成功注册任何账号');
+                        toast.warning(`Outlook 批量注册完成，但没有成功注册任何账号${getExecutionModeFailureHint()}`);
                     }
                 }
             }

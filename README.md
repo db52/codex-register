@@ -146,9 +146,9 @@ docker-compose up -d
 
 ```bash
 docker run -d \
-  -p 1455:1455 \
+  -p 15555:15555 \
   -e WEBUI_HOST=0.0.0.0 \
-  -e WEBUI_PORT=1455 \
+  -e WEBUI_PORT=15555 \
   -e WEBUI_ACCESS_PASSWORD=your_secure_password \
   -v $(pwd)/data:/app/data \
   --name codex-register \
@@ -157,7 +157,7 @@ docker run -d \
 
 环境变量说明：
 - `WEBUI_HOST`: 监听的主机地址 (默认 `0.0.0.0`)
-- `WEBUI_PORT`: 监听的端口 (默认 `1455`)
+- `WEBUI_PORT`: 监听的端口 (默认 `15555`)
 - `WEBUI_ACCESS_PASSWORD`: 设置 Web UI 的访问密码
 - `DEBUG`: 设为 `1` 或 `true` 开启调试模式
 - `LOG_LEVEL`: 日志级别，如 `info`, `debug`
@@ -373,8 +373,7 @@ docker-compose build --no-cache
 - CPA / Sub2API / Team Manager 上传始终直连，不走代理；其中 CPA 可选把账号记录的代理写入 auth file 的 `proxy_url`
 - 注册时自动随机生成用户名和生日（年龄范围 18-45 岁）
 - 支付链接生成使用账号 access_token 鉴权，走全局代理配置
-- 无痕浏览器优先使用 playwright（注入 cookie 直达支付页）；未安装时降级为系统 Chrome/Edge 无痕模式
-- 安装完整支付功能：`pip install ".[payment]" && playwright install chromium`（可选）
+- 无痕打开支付页默认调用系统 Chrome/Edge 的隐私模式
 - 订阅状态自动检测调用 `chatgpt.com/backend-api/me`，走全局代理
 - 批量注册并发数上限为 50，线程池大小已相应调整
 

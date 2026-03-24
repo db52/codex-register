@@ -9,6 +9,7 @@ services:
       - WEBUI_ACCESS_PASSWORD=admin123
       - DEBUG=0
       - LOG_LEVEL=info
+      - APP_ACCESS_PASSWORD=Ricardo0304181@
     volumes:
       # 挂载数据目录以持久化数据库和日志
       - ./data:/app/data

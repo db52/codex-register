@@ -237,33 +237,30 @@ class FreemailService(BaseEmailService):
                     if "openai" not in content.lower():
                         continue
 
-                    # 尝试直接使用 Freemail 提取的验证码
-                    v_code = mail.get("verification_code")
-                    if v_code:
-                        logger.info(f"从 Freemail 邮箱 {email} 找到验证码: {v_code}")
-                        self.update_status(True)
-                        return v_code
-
-                    # 如果没有直接提供，通过正则匹配 preview
-                    match = re.search(pattern, content)
-                    if match:
-                        code = match.group(1)
+                    code = self._extract_otp_from_text(content, pattern)
+                    if code:
                         logger.info(f"从 Freemail 邮箱 {email} 找到验证码: {code}")
                         self.update_status(True)
                         return code
+
+                    v_code = str(mail.get("verification_code") or "").strip()
 
                     # 如果依然未找到，获取邮件详情进行匹配
                     try:
                         detail = self._make_request("GET", f"/api/email/{mail_id}")
                         full_content = str(detail.get("content", "")) + "\n" + str(detail.get("html_content", ""))
-                        match = re.search(pattern, full_content)
-                        if match:
-                            code = match.group(1)
+                        code = self._extract_otp_from_text(full_content, pattern)
+                        if code:
                             logger.info(f"从 Freemail 邮箱 {email} 找到验证码: {code}")
                             self.update_status(True)
                             return code
                     except Exception as e:
                         logger.debug(f"获取 Freemail 邮件详情失败: {e}")
+
+                    if re.fullmatch(r"\d{6}", v_code):
+                        logger.info(f"从 Freemail 邮箱 {email} 找到验证码: {v_code}")
+                        self.update_status(True)
+                        return v_code
 
             except Exception as e:
                 logger.debug(f"检查 Freemail 邮件时出错: {e}")

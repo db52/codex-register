@@ -5,12 +5,13 @@
 
 import abc
 import logging
+import re
 import time
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, List
 from enum import Enum
 
-from ..config.constants import EmailServiceType
+from ..config.constants import EmailServiceType, OTP_CODE_PATTERN, OTP_CODE_SEMANTIC_PATTERN
 
 
 logger = logging.getLogger(__name__)
@@ -146,6 +147,8 @@ class BaseEmailService(abc.ABC):
         self._last_error = None
         self._provider_backoff = reset_adaptive_backoff()
 
+    _EMAIL_ADDRESS_PATTERN = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+
     @property
     def status(self) -> EmailServiceStatus:
         """获取服务状态"""
@@ -270,6 +273,30 @@ class BaseEmailService(abc.ABC):
         for email_info in self.list_emails():
             if email_info.get("id") == email_id:
                 return email_info
+        return None
+
+    def _strip_email_addresses(self, text: str) -> str:
+        """移除文本中的邮箱地址，避免域名数字被误识别为验证码。"""
+        return self._EMAIL_ADDRESS_PATTERN.sub(" ", text or "")
+
+    def _extract_otp_from_text(self, text: str, pattern: Optional[str] = None) -> Optional[str]:
+        """
+        从文本中提取验证码。
+
+        优先语义匹配，再在移除邮箱地址后的文本上做 6 位数字兜底。
+        """
+        if not text:
+            return None
+
+        semantic_match = re.search(OTP_CODE_SEMANTIC_PATTERN, text, re.IGNORECASE)
+        if semantic_match:
+            return semantic_match.group(1)
+
+        fallback_pattern = pattern or OTP_CODE_PATTERN
+        simple_match = re.search(fallback_pattern, self._strip_email_addresses(text))
+        if simple_match:
+            return simple_match.group(1)
+
         return None
 
     def wait_for_email(

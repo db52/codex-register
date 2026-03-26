@@ -532,6 +532,11 @@ def delete_proxy(db: Session, proxy_id: int) -> bool:
     db.commit()
     return True
 
+def delete_disabled_proxies(db: Session) -> int:
+    """删除所有已禁用代理"""
+    deleted = db.query(Proxy).filter(Proxy.enabled == False).delete(synchronize_session=False)
+    db.commit()
+    return deleted
 
 def update_proxy_last_used(db: Session, proxy_id: int) -> bool:
     """更新代理最后使用时间"""

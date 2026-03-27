@@ -15,7 +15,7 @@ from email.policy import default as email_policy
 from html import unescape
 from typing import Optional, Dict, Any, List
 
-from .base import BaseEmailService, EmailServiceError, EmailServiceType, RateLimitedEmailServiceError
+from .base import BaseEmailService, EmailServiceError, EmailServiceType, RateLimitedEmailServiceError, get_email_code_settings
 from ..core.http_client import HTTPClient, RequestConfig
 from ..config.constants import OTP_CODE_PATTERN
 
@@ -307,6 +307,7 @@ class TempMailService(BaseEmailService):
         logger.info(f"正在从 TempMail 邮箱 {email} 获取验证码...")
 
         start_time = time.time()
+        poll_interval = get_email_code_settings()["poll_interval"]
         seen_mail_ids: set = set()
 
         # 优先使用用户级 JWT，回退到 admin API 先注释用户级API
@@ -332,15 +333,32 @@ class TempMailService(BaseEmailService):
                 # /user_api/mails 和 /admin/mails 返回格式相同: {"results": [...], "total": N}
                 mails = response.get("results", [])
                 if not isinstance(mails, list):
-                    time.sleep(3)
+                    time.sleep(poll_interval)
                     continue
 
-                for mail in mails:
+                ordered_mails = self._sort_items_by_message_time(
+                    mails,
+                    lambda item: (
+                        item.get("createdAt")
+                        or item.get("created_at")
+                        or item.get("receivedAt")
+                        or item.get("received_at")
+                    ) if isinstance(item, dict) else None,
+                )
+
+                for mail in ordered_mails:
                     mail_id = mail.get("id")
                     if not mail_id or mail_id in seen_mail_ids:
                         continue
 
                     seen_mail_ids.add(mail_id)
+                    message_marker = f"id:{mail_id}"
+
+                    if self._is_message_before_otp(
+                        mail.get("createdAt") or mail.get("created_at") or mail.get("receivedAt") or mail.get("received_at"),
+                        otp_sent_at,
+                    ):
+                        continue
 
                     parsed = self._extract_mail_fields(mail)
                     sender = parsed["sender"].lower()
@@ -355,6 +373,8 @@ class TempMailService(BaseEmailService):
 
                     code = self._extract_otp_from_text(content, pattern)
                     if code:
+                        if not self._accept_verification_code(email, code, message_marker):
+                            continue
                         logger.info(f"从 TempMail 邮箱 {email} 找到验证码: {code}")
                         self.update_status(True)
                         return code
@@ -362,7 +382,7 @@ class TempMailService(BaseEmailService):
             except Exception as e:
                 logger.debug(f"检查 TempMail 邮件时出错: {e}")
 
-            time.sleep(3)
+            time.sleep(poll_interval)
 
         logger.warning(f"等待 TempMail 验证码超时: {email}")
         return None

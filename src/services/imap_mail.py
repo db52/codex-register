@@ -12,7 +12,7 @@ import logging
 from email.header import decode_header
 from typing import Any, Dict, Optional
 
-from .base import BaseEmailService, EmailServiceError
+from .base import BaseEmailService, EmailServiceError, get_email_code_settings
 from ..config.constants import (
     EmailServiceType,
     OPENAI_EMAIL_SENDERS,
@@ -123,6 +123,7 @@ class ImapMailService(BaseEmailService):
         otp_sent_at: Optional[float] = None,
     ) -> Optional[str]:
         """轮询 IMAP 收件箱，获取 OpenAI 验证码"""
+        poll_interval = get_email_code_settings()["poll_interval"]
         start_time = time.time()
         seen_ids: set = set()
         mail = None
@@ -136,7 +137,7 @@ class ImapMailService(BaseEmailService):
                     # 搜索所有未读邮件
                     status, data = mail.search(None, "UNSEEN")
                     if status != "OK" or not data or not data[0]:
-                        time.sleep(3)
+                        time.sleep(poll_interval)
                         continue
 
                     msg_ids = data[0].split()
@@ -177,7 +178,7 @@ class ImapMailService(BaseEmailService):
                     except Exception:
                         pass
 
-                time.sleep(3)
+                time.sleep(poll_interval)
 
         except Exception as e:
             logger.warning(f"IMAP 连接/轮询失败: {e}")

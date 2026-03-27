@@ -35,7 +35,8 @@ class GenerateLinkRequest(BaseModel):
     seat_quantity: int = 5
     proxy: Optional[str] = None
     auto_open: bool = False  # 生成后是否自动无痕打开
-    country: str = "SG"  # 计费国家，决定货币  # 生成后是否自动无痕打开
+    country: str = "SG"  # 计费国家，决定货币
+    currency: Optional[str] = None  # 前端动态获取的货币代码，优先于静态映射表
 
 
 class OpenIncognitoRequest(BaseModel):
@@ -70,7 +71,7 @@ def generate_payment_link(request: GenerateLinkRequest):
 
         try:
             if request.plan_type == "plus":
-                link = generate_plus_link(account, proxy, country=request.country)
+                link = generate_plus_link(account, proxy, country=request.country, currency=request.currency)
             elif request.plan_type == "team":
                 link = generate_team_link(
                     account,
@@ -79,6 +80,7 @@ def generate_payment_link(request: GenerateLinkRequest):
                     seat_quantity=request.seat_quantity,
                     proxy=proxy,
                     country=request.country,
+                    currency=request.currency,
                 )
             else:
                 raise HTTPException(status_code=400, detail="plan_type 必须为 plus 或 team")
@@ -183,47 +185,120 @@ def mark_subscription(account_id: int, request: MarkSubscriptionRequest):
 _countries_cache: dict = {}  # {"data": [...], "expires_at": float}
 
 
+def _get_fallback_countries():
+    """内置 fallback 国家/货币列表"""
+    return [
+        {"country_code": "AU", "currency": "AUD", "country_name": "AU"},
+        {"country_code": "BR", "currency": "BRL", "country_name": "BR"},
+        {"country_code": "CA", "currency": "CAD", "country_name": "CA"},
+        {"country_code": "GB", "currency": "GBP", "country_name": "GB"},
+        {"country_code": "HK", "currency": "HKD", "country_name": "HK"},
+        {"country_code": "IN", "currency": "INR", "country_name": "IN"},
+        {"country_code": "JP", "currency": "JPY", "country_name": "JP"},
+        {"country_code": "MX", "currency": "MXN", "country_name": "MX"},
+        {"country_code": "SG", "currency": "SGD", "country_name": "SG"},
+        {"country_code": "TR", "currency": "TRY", "country_name": "TR"},
+        {"country_code": "US", "currency": "USD", "country_name": "US"},
+    ]
+
+
 @router.get("/countries")
 def get_checkout_countries():
-    """从 ChatGPT checkout 接口获取支持的国家/货币列表（缓存 1 小时）"""
+    """从 ChatGPT checkout 接口获取支持的国家/货币列表（优先读 DB 缓存，成功后回写）"""
     import time
+    import json
     import curl_cffi.requests as cffi_requests
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
+    _DB_CACHE_KEY = "cache.checkout_countries"
     now = time.time()
+
+    # 1. 内存缓存命中
     if _countries_cache.get("expires_at", 0) > now:
         return {"success": True, "countries": _countries_cache["data"]}
 
+    # 2. 读取 DB 缓存
     with get_db() as db:
         proxy = get_settings().get_proxy_url(db=db)
+        db_setting = crud.get_setting(db, _DB_CACHE_KEY)
+        if db_setting and db_setting.value:
+            try:
+                cached = json.loads(db_setting.value)
+                if cached.get("expires_at", 0) > now:
+                    _countries_cache.update(cached)
+                    return {"success": True, "countries": cached["data"]}
+            except Exception:
+                pass
 
+    proxies = {"http": proxy, "https": proxy} if proxy else None
+
+    # 3. 请求 ChatGPT API 获取国家代码列表
     try:
         resp = cffi_requests.get(
             "https://chatgpt.com/backend-api/checkout_pricing_config/countries",
-            proxies={"http": proxy, "https": proxy} if proxy else None,
+            proxies=proxies,
             timeout=15,
             impersonate="chrome110",
         )
         resp.raise_for_status()
-        data = resp.json()
-        countries = data if isinstance(data, list) else data.get("countries", [])
-        _countries_cache["data"] = countries
-        _countries_cache["expires_at"] = now + 3600
-        return {"success": True, "countries": countries}
+        raw = resp.json()
+        country_codes = raw.get("countries", []) if isinstance(raw, dict) else raw
+        if not isinstance(country_codes, list) or not country_codes:
+            raise ValueError(f"国家列表为空或格式异常: {str(raw)[:200]}")
     except Exception as e:
-        logger.warning(f"获取国家列表失败: {e}")
-        fallback = [
-            {"country_code": "SG", "currency": "SGD", "country_name": "Singapore"},
-            {"country_code": "US", "currency": "USD", "country_name": "United States"},
-            {"country_code": "TR", "currency": "TRY", "country_name": "Turkey"},
-            {"country_code": "JP", "currency": "JPY", "country_name": "Japan"},
-            {"country_code": "HK", "currency": "HKD", "country_name": "Hong Kong"},
-            {"country_code": "GB", "currency": "GBP", "country_name": "United Kingdom"},
-            {"country_code": "AU", "currency": "AUD", "country_name": "Australia"},
-            {"country_code": "CA", "currency": "CAD", "country_name": "Canada"},
-            {"country_code": "IN", "currency": "INR", "country_name": "India"},
-            {"country_code": "BR", "currency": "BRL", "country_name": "Brazil"},
-            {"country_code": "MX", "currency": "MXN", "country_name": "Mexico"},
-        ]
-        return {"success": False, "countries": fallback, "error": str(e)}
+        logger.warning(f"获取国家代码列表失败: {e}")
+        return {"success": False, "countries": _get_fallback_countries(), "error": str(e)}
+
+    # 4. 并发请求各国 configs，提取 symbol_code
+    def fetch_config(code: str):
+        try:
+            r = cffi_requests.get(
+                f"https://chatgpt.com/backend-api/checkout_pricing_config/configs/{code}",
+                proxies=proxies,
+                timeout=10,
+                impersonate="chrome110",
+            )
+            if r.status_code == 200:
+                data = r.json()
+                cfg = data.get("currency_config", {})
+                currency = cfg.get("symbol_code") or cfg.get("symbol") or ""
+                if currency:
+                    return {"country_code": code, "currency": currency, "country_name": code}
+        except Exception:
+            pass
+        return None
+
+    countries = []
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(fetch_config, code): code for code in country_codes}
+        for future in as_completed(futures):
+            result = future.result()
+            if result:
+                countries.append(result)
+
+    countries.sort(key=lambda c: c["country_code"])
+
+    if not countries:
+        logger.warning("所有国家 configs 请求均失败，使用 fallback")
+        return {"success": False, "countries": _get_fallback_countries(), "error": "所有 configs 请求失败"}
+
+    # 5. 写入内存缓存 + DB 缓存（缓存 7 天）
+    expires_at = now + 86400 * 7
+    cache_payload = {"data": countries, "expires_at": expires_at}
+    _countries_cache.update(cache_payload)
+
+    try:
+        with get_db() as db:
+            crud.set_setting(
+                db,
+                key=_DB_CACHE_KEY,
+                value=json.dumps(cache_payload, ensure_ascii=False),
+                description="checkout 国家/货币列表缓存",
+                category="cache",
+            )
+    except Exception as e:
+        logger.warning(f"写入 DB 缓存失败（不影响返回结果）: {e}")
+
+    return {"success": True, "countries": countries}
 
 

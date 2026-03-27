@@ -10,7 +10,7 @@ import random
 import string
 from typing import Optional, Dict, Any, List
 
-from .base import BaseEmailService, EmailServiceError, EmailServiceType, RateLimitedEmailServiceError
+from .base import BaseEmailService, EmailServiceError, EmailServiceType, RateLimitedEmailServiceError, get_email_code_settings
 from ..core.http_client import HTTPClient, RequestConfig
 from ..config.constants import OTP_CODE_PATTERN
 
@@ -211,6 +211,7 @@ class FreemailService(BaseEmailService):
         """
         logger.info(f"正在从 Freemail 邮箱 {email} 获取验证码...")
 
+        poll_interval = get_email_code_settings()["poll_interval"]
         start_time = time.time()
         seen_mail_ids: set = set()
 
@@ -218,15 +219,32 @@ class FreemailService(BaseEmailService):
             try:
                 mails = self._make_request("GET", "/api/emails", params={"mailbox": email, "limit": 20})
                 if not isinstance(mails, list):
-                    time.sleep(3)
+                    time.sleep(poll_interval)
                     continue
 
-                for mail in mails:
+                ordered_mails = self._sort_items_by_message_time(
+                    mails,
+                    lambda item: (
+                        item.get("created_at")
+                        or item.get("createdAt")
+                        or item.get("received_at")
+                        or item.get("receivedAt")
+                    ) if isinstance(item, dict) else None,
+                )
+
+                for mail in ordered_mails:
                     mail_id = mail.get("id")
                     if not mail_id or mail_id in seen_mail_ids:
                         continue
 
                     seen_mail_ids.add(mail_id)
+                    message_marker = f"id:{mail_id}"
+
+                    if self._is_message_before_otp(
+                        mail.get("created_at") or mail.get("createdAt") or mail.get("received_at") or mail.get("receivedAt"),
+                        otp_sent_at,
+                    ):
+                        continue
 
                     sender = str(mail.get("sender", "")).lower()
                     subject = str(mail.get("subject", ""))
@@ -239,11 +257,11 @@ class FreemailService(BaseEmailService):
 
                     code = self._extract_otp_from_text(content, pattern)
                     if code:
+                        if not self._accept_verification_code(email, code, message_marker):
+                            continue
                         logger.info(f"从 Freemail 邮箱 {email} 找到验证码: {code}")
                         self.update_status(True)
                         return code
-
-                    v_code = str(mail.get("verification_code") or "").strip()
 
                     # 如果依然未找到，获取邮件详情进行匹配
                     try:
@@ -251,13 +269,18 @@ class FreemailService(BaseEmailService):
                         full_content = str(detail.get("content", "")) + "\n" + str(detail.get("html_content", ""))
                         code = self._extract_otp_from_text(full_content, pattern)
                         if code:
+                            if not self._accept_verification_code(email, code, message_marker):
+                                continue
                             logger.info(f"从 Freemail 邮箱 {email} 找到验证码: {code}")
                             self.update_status(True)
                             return code
                     except Exception as e:
                         logger.debug(f"获取 Freemail 邮件详情失败: {e}")
 
+                    v_code = str(mail.get("verification_code") or "").strip()
                     if re.fullmatch(r"\d{6}", v_code):
+                        if not self._accept_verification_code(email, v_code, message_marker):
+                            continue
                         logger.info(f"从 Freemail 邮箱 {email} 找到验证码: {v_code}")
                         self.update_status(True)
                         return v_code
@@ -265,7 +288,7 @@ class FreemailService(BaseEmailService):
             except Exception as e:
                 logger.debug(f"检查 Freemail 邮件时出错: {e}")
 
-            time.sleep(3)
+            time.sleep(poll_interval)
 
         logger.warning(f"等待 Freemail 验证码超时: {email}")
         return None

@@ -37,7 +37,7 @@ from ..config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
-OTP_SECONDARY_TIMEOUT_SECONDS = 120
+OTP_SECONDARY_TIMEOUT_SECONDS = 120  # 默认值，运行时由 get_settings().email_code_timeout 覆盖
 PHASE_EMAIL_PREPARE = "email_prepare"
 PHASE_OTP_SECONDARY = "otp_secondary"
 ERROR_EMAIL_PROVIDER_RATE_LIMITED = "EMAIL_PROVIDER_RATE_LIMITED"
@@ -646,7 +646,7 @@ class RegistrationEngine:
 
             email_id = self.email_info.get("service_id") if self.email_info else None
             budget = Budget(
-                timeout_seconds=OTP_SECONDARY_TIMEOUT_SECONDS,
+                timeout_seconds=get_settings().email_code_timeout,
                 started_at=started_at if started_at is not None else time.time(),
             )
             remaining_timeout = budget.remaining_seconds()
@@ -1537,19 +1537,31 @@ class RegistrationEngine:
                     result.error_message = "发送验证码失败"
                     return result
 
-            # 10. 获取验证码
+            # 10. 获取验证码（支持重发重试）
             self._log("10. 等待验证码...")
             self._emit_status("otp_secondary", "等待验证码邮件", step_index=10)
             otp_phase_started_at = time.time()
-            code, otp_phase = self._phase_otp_secondary(
-                PhaseContext(otp_sent_at=self._otp_sent_at),
-                started_at=otp_phase_started_at,
-            )
+            _resend_max = get_settings().email_code_resend_max_retries
+            code, otp_phase = None, None
+            for _resend_attempt in range(_resend_max + 1):
+                if _resend_attempt > 0:
+                    self._log(f"10. 收件箱未找到验证码，第 {_resend_attempt} 次重新发送验证码...")
+                    self._emit_status("otp_resend", f"重新发送验证码（第 {_resend_attempt} 次）", step_index=10)
+                    if not self._send_verification_code():
+                        self._log("重新发送验证码失败，跳过本次重试", "warning")
+                        continue
+                code, otp_phase = self._phase_otp_secondary(
+                    PhaseContext(otp_sent_at=self._otp_sent_at),
+                    started_at=otp_phase_started_at,
+                )
+                if code:
+                    break
+                otp_phase_started_at = time.time()
             if not code:
                 result.error_message = (
-                    otp_phase.error_message if otp_phase.error_message else "获取验证码失败"
+                    otp_phase.error_message if otp_phase and otp_phase.error_message else "获取验证码失败"
                 )
-                result.error_code = otp_phase.error_code
+                result.error_code = otp_phase.error_code if otp_phase else ""
                 return result
 
             # 11. 验证验证码
@@ -1681,6 +1693,10 @@ class RegistrationEngine:
         try:
             # 获取默认 client_id
             settings = get_settings()
+            metadata = dict(result.metadata or {})
+            verification_state = self.email_service.export_verification_state(result.email or self.email)
+            if verification_state["used_codes"] or verification_state["seen_messages"]:
+                metadata["verification_state"] = verification_state
 
             with get_db() as db:
                 # 保存账户信息
@@ -1699,7 +1715,7 @@ class RegistrationEngine:
                     id_token=result.id_token,
                     cookies=result.cookies,
                     proxy_used=self.proxy_url,
-                    extra_data=result.metadata,
+                    extra_data=metadata,
                     source=result.source
                 )
 

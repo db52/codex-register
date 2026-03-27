@@ -10,7 +10,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from .base import BaseEmailService, EmailServiceError, EmailServiceType, RateLimitedEmailServiceError
+from .base import BaseEmailService, EmailServiceError, EmailServiceType, RateLimitedEmailServiceError, get_email_code_settings
 from ..config.constants import OTP_CODE_PATTERN
 from ..core.http_client import HTTPClient, RequestConfig
 
@@ -231,6 +231,7 @@ class CloudMailService(BaseEmailService):
     ) -> Optional[str]:
         logger.info(f"正在从 Cloud Mail 邮箱 {email} 获取验证码...")
 
+        poll_interval = get_email_code_settings()["poll_interval"]
         start_time = time.time()
         seen_mail_ids: set = set()
 
@@ -252,7 +253,7 @@ class CloudMailService(BaseEmailService):
                     mails = mails["list"]
 
                 if not isinstance(mails, list):
-                    time.sleep(3)
+                    time.sleep(poll_interval)
                     continue
 
                 for mail in mails:
@@ -288,7 +289,7 @@ class CloudMailService(BaseEmailService):
             except Exception as e:
                 logger.debug(f"检查 Cloud Mail 邮件时出错: {e}")
 
-            time.sleep(3)
+            time.sleep(poll_interval)
 
         logger.warning(f"等待 Cloud Mail 验证码超时: {email}")
         return None

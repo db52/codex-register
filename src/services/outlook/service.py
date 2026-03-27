@@ -8,9 +8,8 @@ import threading
 import time
 from typing import Optional, Dict, Any, List
 
-from ..base import BaseEmailService, EmailServiceError, EmailServiceStatus, EmailServiceType
+from ..base import BaseEmailService, EmailServiceError, EmailServiceStatus, EmailServiceType, get_email_code_settings
 from ...config.constants import EmailServiceType as ServiceType
-from ...config.settings import get_settings
 from .account import OutlookAccount
 from .base import ProviderType, EmailMessage
 from .email_parser import EmailParser, get_email_parser
@@ -32,15 +31,6 @@ DEFAULT_PROVIDER_PRIORITY = [
     ProviderType.IMAP_NEW,
     ProviderType.GRAPH_API,
 ]
-
-
-def get_email_code_settings() -> dict:
-    """获取验证码等待配置"""
-    settings = get_settings()
-    return {
-        "timeout": settings.email_code_timeout,
-        "poll_interval": settings.email_code_poll_interval,
-    }
 
 
 class OutlookService(BaseEmailService):

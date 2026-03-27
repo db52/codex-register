@@ -386,6 +386,7 @@ class EmailCodeSettings(BaseModel):
     """验证码等待设置"""
     timeout: int = 120  # 验证码等待超时（秒）
     poll_interval: int = 3  # 验证码轮询间隔（秒）
+    resend_max_retries: int = 2  # 收件箱未找到验证码时最多重新发送次数
 
 
 @router.get("/tempmail")
@@ -423,6 +424,7 @@ async def get_email_code_settings():
     return {
         "timeout": settings.email_code_timeout,
         "poll_interval": settings.email_code_poll_interval,
+        "resend_max_retries": settings.email_code_resend_max_retries,
     }
 
 
@@ -435,9 +437,13 @@ async def update_email_code_settings(request: EmailCodeSettings):
     if request.poll_interval < 1 or request.poll_interval > 30:
         raise HTTPException(status_code=400, detail="轮询间隔必须在 1-30 秒之间")
 
+    if request.resend_max_retries < 0 or request.resend_max_retries > 10:
+        raise HTTPException(status_code=400, detail="重发次数必须在 0-10 之间")
+
     update_settings(
         email_code_timeout=request.timeout,
         email_code_poll_interval=request.poll_interval,
+        email_code_resend_max_retries=request.resend_max_retries,
     )
 
     return {"success": True, "message": "验证码等待设置已更新"}

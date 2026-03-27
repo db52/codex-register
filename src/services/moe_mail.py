@@ -10,7 +10,7 @@ import logging
 from typing import Optional, Dict, Any, List
 from urllib.parse import urljoin
 
-from .base import BaseEmailService, EmailServiceError, EmailServiceType, RateLimitedEmailServiceError
+from .base import BaseEmailService, EmailServiceError, EmailServiceType, RateLimitedEmailServiceError, get_email_code_settings
 from ..core.http_client import HTTPClient, RequestConfig
 from ..config.constants import OTP_CODE_PATTERN
 
@@ -303,6 +303,7 @@ class MeoMailEmailService(BaseEmailService):
 
         logger.info(f"正在从自定义域名邮箱 {email} 获取验证码...")
 
+        poll_interval = get_email_code_settings()["poll_interval"]
         start_time = time.time()
         seen_message_ids = set()
 
@@ -313,15 +314,32 @@ class MeoMailEmailService(BaseEmailService):
 
                 messages = response.get("messages", [])
                 if not isinstance(messages, list):
-                    time.sleep(3)
+                    time.sleep(poll_interval)
                     continue
 
-                for message in messages:
+                ordered_messages = self._sort_items_by_message_time(
+                    messages,
+                    lambda item: (
+                        item.get("created_at")
+                        or item.get("createdAt")
+                        or item.get("received_at")
+                        or item.get("receivedAt")
+                    ) if isinstance(item, dict) else None,
+                )
+
+                for message in ordered_messages:
                     message_id = message.get("id")
                     if not message_id or message_id in seen_message_ids:
                         continue
 
                     seen_message_ids.add(message_id)
+                    message_marker = f"id:{message_id}"
+
+                    if self._is_message_before_otp(
+                        message.get("created_at") or message.get("createdAt") or message.get("received_at") or message.get("receivedAt"),
+                        otp_sent_at,
+                    ):
+                        continue
 
                     # 检查是否是目标邮件
                     sender = str(message.get("from_address", "")).lower()
@@ -343,6 +361,8 @@ class MeoMailEmailService(BaseEmailService):
                     match = re.search(pattern, re.sub(email_pattern, "", content))
                     if match:
                         code = match.group(1)
+                        if not self._accept_verification_code(email, code, message_marker):
+                            continue
                         logger.info(f"从自定义域名邮箱 {email} 找到验证码: {code}")
                         self.update_status(True)
                         return code
@@ -351,7 +371,7 @@ class MeoMailEmailService(BaseEmailService):
                 logger.debug(f"检查邮件时出错: {e}")
 
             # 等待一段时间再检查
-            time.sleep(3)
+            time.sleep(poll_interval)
 
         logger.warning(f"等待验证码超时: {email}")
         return None

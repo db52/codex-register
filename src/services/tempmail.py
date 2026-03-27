@@ -8,7 +8,7 @@ import logging
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
 
-from .base import BaseEmailService, EmailServiceError, EmailServiceType
+from .base import BaseEmailService, EmailServiceError, EmailServiceType, get_email_code_settings
 from ..core.http_client import HTTPClient, RequestConfig
 from ..config.constants import OTP_CODE_PATTERN
 
@@ -212,6 +212,7 @@ class TempmailService(BaseEmailService):
 
         logger.info(f"正在等待邮箱 {email} 的验证码...")
 
+        poll_interval = get_email_code_settings()["poll_interval"]
         start_time = time.time()
         seen_ids = set()
 
@@ -225,7 +226,7 @@ class TempmailService(BaseEmailService):
                 )
 
                 if response.status_code != 200:
-                    time.sleep(3)
+                    time.sleep(poll_interval)
                     continue
 
                 data = response.json()
@@ -238,10 +239,15 @@ class TempmailService(BaseEmailService):
                 email_list = data.get("emails", []) if isinstance(data, dict) else []
 
                 if not isinstance(email_list, list):
-                    time.sleep(3)
+                    time.sleep(poll_interval)
                     continue
 
-                for msg in email_list:
+                ordered_emails = self._sort_items_by_message_time(
+                    email_list,
+                    lambda item: item.get("date") if isinstance(item, dict) else None,
+                )
+
+                for msg in ordered_emails:
                     if not isinstance(msg, dict):
                         continue
 
@@ -260,6 +266,7 @@ class TempmailService(BaseEmailService):
                     if not message_id or message_id in seen_ids:
                         continue
                     seen_ids.add(message_id)
+                    message_marker = f"id:{message_id}"
 
                     sender = str(msg.get("from", "")).lower()
                     subject = str(msg.get("subject", ""))
@@ -276,6 +283,8 @@ class TempmailService(BaseEmailService):
                     match = re.search(pattern, content)
                     if match:
                         code = match.group(1)
+                        if not self._accept_verification_code(email, code, message_marker):
+                            continue
                         logger.info(f"找到验证码: {code}")
                         self.update_status(True)
                         return code
@@ -284,7 +293,7 @@ class TempmailService(BaseEmailService):
                 logger.debug(f"检查邮件时出错: {e}")
 
             # 等待一段时间再检查
-            time.sleep(3)
+            time.sleep(poll_interval)
 
         logger.warning(f"等待验证码超时: {email}")
         return None
@@ -376,6 +385,7 @@ class TempmailService(BaseEmailService):
         Returns:
             验证码或 None
         """
+        poll_interval = get_email_code_settings()["poll_interval"]
         start_time = time.time()
         seen_ids = set()
         check_count = 0
@@ -394,7 +404,7 @@ class TempmailService(BaseEmailService):
             try:
                 data = self.get_inbox(token)
                 if not data:
-                    time.sleep(3)
+                    time.sleep(poll_interval)
                     continue
 
                 # 检查 inbox 是否过期
@@ -457,7 +467,7 @@ class TempmailService(BaseEmailService):
                         "message": "检查邮件时出错"
                     })
 
-            time.sleep(3)
+            time.sleep(poll_interval)
 
         if callback:
             callback({

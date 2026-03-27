@@ -399,6 +399,7 @@ async function loadSettings() {
         if (data.email_code) {
             document.getElementById('email-code-timeout').value = data.email_code.timeout || 120;
             document.getElementById('email-code-poll-interval').value = data.email_code.poll_interval || 3;
+            document.getElementById('email-code-resend-max-retries').value = data.email_code.resend_max_retries ?? 2;
         }
 
         // 加载 Outlook 设置
@@ -563,9 +564,17 @@ async function handleSaveEmailCode(e) {
         return;
     }
 
+    const resendMaxRetries = parseInt(document.getElementById('email-code-resend-max-retries').value);
+
+    if (resendMaxRetries < 0 || resendMaxRetries > 10) {
+        toast.error('重发次数必须在 0-10 之间');
+        return;
+    }
+
     const data = {
         timeout: timeout,
-        poll_interval: pollInterval
+        poll_interval: pollInterval,
+        resend_max_retries: resendMaxRetries
     };
 
     try {
@@ -1367,6 +1376,28 @@ function closeNewapiServiceModal() {
     elements.newapiServiceEditModal.classList.remove('active');
 }
 
+function validateNewapiApiKeyInput(apiKey, { required = false } = {}) {
+    const normalizedApiKey = String(apiKey || '').trim();
+    if (!normalizedApiKey) {
+        if (required) {
+            return '新增服务时 Root Token / API Key 不能为空';
+        }
+        return '';
+    }
+
+    for (const char of normalizedApiKey) {
+        const code = char.charCodeAt(0);
+        if (code > 127) {
+            return 'Root Token / API Key 只能包含 ASCII 字符，请粘贴实际令牌，不要填写中文说明';
+        }
+        if (code < 32 || code === 127) {
+            return 'Root Token / API Key 包含非法控制字符';
+        }
+    }
+
+    return '';
+}
+
 async function editNewapiService(id) {
     try {
         const service = await api.get(`/newapi-services/${id}`);
@@ -1392,8 +1423,9 @@ async function handleSaveNewapiService(e) {
         toast.error('名称和 API URL 不能为空');
         return;
     }
-    if (!id && !apiKey) {
-        toast.error('新增服务时 Root Token / API Key 不能为空');
+    const apiKeyValidationError = validateNewapiApiKeyInput(apiKey, { required: !id });
+    if (apiKeyValidationError) {
+        toast.error(apiKeyValidationError);
         return;
     }
 

@@ -20,7 +20,7 @@ from email.header import decode_header
 from email.utils import parsedate_to_datetime
 from urllib.error import HTTPError
 
-from .base import BaseEmailService, EmailServiceError, EmailServiceType
+from .base import BaseEmailService, EmailServiceError, EmailServiceType, get_email_code_settings
 from ..config.constants import (
     OTP_CODE_PATTERN,
     OTP_CODE_SIMPLE_PATTERN,
@@ -28,21 +28,6 @@ from ..config.constants import (
     OPENAI_EMAIL_SENDERS,
     OPENAI_VERIFICATION_KEYWORDS,
 )
-from ..config.settings import get_settings
-
-
-def get_email_code_settings() -> dict:
-    """
-    获取验证码等待配置
-
-    Returns:
-        dict: 包含 timeout 和 poll_interval 的字典
-    """
-    settings = get_settings()
-    return {
-        "timeout": settings.email_code_timeout,
-        "poll_interval": settings.email_code_poll_interval,
-    }
 
 
 logger = logging.getLogger(__name__)

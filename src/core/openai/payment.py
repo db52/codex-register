@@ -5,6 +5,7 @@
 import logging
 import subprocess
 import sys
+import uuid
 from typing import Optional
 
 from curl_cffi import requests as cffi_requests
@@ -154,12 +155,8 @@ def generate_team_link(
         "Authorization": f"Bearer {account.access_token}",
         "Content-Type": "application/json",
         "oai-language": "zh-CN",
+        "oai-device-id": str(uuid.uuid4()),
     }
-    if account.cookies:
-        headers["cookie"] = account.cookies
-        oai_did = _extract_oai_did(account.cookies)
-        if oai_did:
-            headers["oai-device-id"] = oai_did
 
     payload = {
         "plan_name": "chatgptteamplan",
@@ -171,7 +168,7 @@ def generate_team_link(
         "billing_details": {"country": country, "currency": currency},
         "promo_campaign": {
             "promo_campaign_id": "team-1-month-free",
-            "is_coupon_from_query_param": True,
+            "is_coupon_from_query_param": False,
         },
         "cancel_url": "https://chatgpt.com/#pricing",
         "checkout_ui_mode": "custom",
@@ -187,9 +184,35 @@ def generate_team_link(
     )
     resp.raise_for_status()
     data = resp.json()
-    if "checkout_session_id" in data:
-        return TEAM_CHECKOUT_BASE_URL + data["checkout_session_id"]
-    raise ValueError(data.get("detail", "API 未返回 checkout_session_id"))
+    resp2 = cffi_requests.post(
+        "https://api.stripe.com/v1/payment_pages/" + data["checkout_session_id"],
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "accept": "application/json",
+            "referer": "https://js.stripe.com/"
+        },
+        data=f"tax_region[country]={country}"
+             "&elements_session_client[client_betas][0]=custom_checkout_server_updates_1"
+             "&elements_session_client[client_betas][1]=custom_checkout_manual_approval_1"
+             "&elements_session_client[elements_init_source]=custom_checkout"
+             "&elements_session_client[referrer_host]=chatgpt.com"
+             "&elements_session_client[session_id]=elements_session_1rr8sS4PKIY"
+             "&elements_session_client[stripe_js_id]=72d6a553-c2fb-4f85-941e-8022c8335a85"
+             "&elements_session_client[locale]=zh"
+             "&elements_session_client[is_aggregation_expected]=false"
+             "&client_attribution_metadata[merchant_integration_additional_elements][0]=payment"
+             "&client_attribution_metadata[merchant_integration_additional_elements][1]=address"
+             f"&key={data["publishable_key"]}"
+        ,
+        proxies=_build_proxies(proxy),
+        timeout=30,
+        impersonate="chrome110",
+    )
+    resp2.raise_for_status()
+    data2 = resp2.json()
+    if "stripe_hosted_url" in data2:
+        return data2["stripe_hosted_url"]
+    raise ValueError(data.get("detail", "API 未返回 stripe_hosted_url"))
 
 
 def open_url_incognito(url: str, cookies_str: Optional[str] = None) -> bool:

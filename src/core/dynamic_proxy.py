@@ -115,4 +115,4 @@ def get_proxy_url_for_task() -> Optional[str]:
         logger.warning("动态代理获取失败，回退到静态代理")
 
     # 使用静态代理
-    return settings.proxy_url
+    return settings.get_proxy_url()

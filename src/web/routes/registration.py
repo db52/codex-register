@@ -53,25 +53,31 @@ def get_proxy_for_registration(
     获取用于注册的代理
 
     策略：
-    1. 优先从代理列表中随机选择一个启用的代理
-    2. 如果代理列表为空且启用了动态代理，调用动态代理 API 获取
-    3. 否则使用系统设置中的静态默认代理
+    1. 优先使用动态代理（若已启用）
+    2. 动态代理不可用时，使用代理池（有默认代理则走默认，否则随机轮询）
+    3. 代理池为空时，使用系统静态代理配置兜底
 
     Returns:
         Tuple[proxy_url, proxy_id]: 代理 URL 和代理 ID（如果来自代理列表）
     """
-    # 先尝试从代理列表中获取
+    from ...core.dynamic_proxy import get_proxy_url_for_task
+
+    settings = get_settings()
+
+    # 1. 优先动态代理
+    if settings.proxy_dynamic_enabled and settings.proxy_dynamic_api_url:
+        proxy_url = get_proxy_url_for_task()
+        if proxy_url:
+            return proxy_url, None
+        logger.warning("动态代理获取失败，回退到代理池")
+
+    # 2. 代理池（内部已实现：有默认走默认，无默认随机轮询）
     proxy = crud.get_random_proxy(db, exclude_ids=exclude_proxy_ids)
     if proxy:
         return proxy.proxy_url, proxy.id
 
-    # 代理列表为空，尝试动态代理或静态代理
-    from ...core.dynamic_proxy import get_proxy_url_for_task
-    proxy_url = get_proxy_url_for_task()
-    if proxy_url:
-        return proxy_url, None
-
-    return None, None
+    # 3. 静态代理兜底
+    return settings.get_proxy_url(), None
 
 
 def update_proxy_usage(db, proxy_id: Optional[int]):

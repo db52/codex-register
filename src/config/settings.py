@@ -638,25 +638,40 @@ class Settings(BaseModel):
     proxy_dynamic_api_key_header: str = "X-API-Key"
     proxy_dynamic_result_field: str = ""
 
-    @property
-    def proxy_url(self) -> Optional[str]:
-        """获取完整的代理 URL"""
-        if not self.proxy_enabled:
-            return None
+    def get_proxy_url(self, db=None) -> Optional[str]:
+        """获取当前可用的代理 URL（三路优先级）
 
-        if self.proxy_type == "http":
-            scheme = "http"
-        elif self.proxy_type == "socks5":
-            scheme = "socks5"
-        else:
-            return None
+        优先级：动态代理 > 代理池（默认/随机）> 静态代理 > None
 
-        auth = ""
-        if self.proxy_username and self.proxy_password:
-            auth = f"{self.proxy_username}:{self.proxy_password.get_secret_value()}@"
+        Args:
+            db: 可选的数据库 session，传入时检查代理池；不传则跳过代理池
+        """
+        # 1. 动态代理
+        if self.proxy_dynamic_enabled and self.proxy_dynamic_api_url:
+            return self.proxy_dynamic_api_url
 
-        return f"{scheme}://{auth}{self.proxy_host}:{self.proxy_port}"
+        # 2 & 3. 代理池（优先 is_default，否则随机）
+        if db is not None:
+            from src.database import crud
+            proxy = crud.get_random_proxy(db)
+            if proxy is not None:
+                return proxy.proxy_url
 
+        # 4. 静态代理
+        if self.proxy_enabled:
+            if self.proxy_type == "http":
+                scheme = "http"
+            elif self.proxy_type == "socks5":
+                scheme = "socks5"
+            else:
+                return None
+            auth = ""
+            if self.proxy_username and self.proxy_password:
+                auth = f"{self.proxy_username}:{self.proxy_password.get_secret_value()}@"
+            return f"{scheme}://{auth}{self.proxy_host}:{self.proxy_port}"
+
+        # 5. 无可用代理
+        return None
     # 注册配置
     registration_max_retries: int = 3
     registration_timeout: int = 120

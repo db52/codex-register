@@ -66,7 +66,7 @@ def generate_payment_link(request: GenerateLinkRequest):
         if not account:
             raise HTTPException(status_code=404, detail="账号不存在")
 
-        proxy = request.proxy or get_settings().proxy_url
+        proxy = request.proxy or get_settings().get_proxy_url(db=db)
 
         try:
             if request.plan_type == "plus":
@@ -125,11 +125,10 @@ def open_browser_incognito(request: OpenIncognitoRequest):
 @router.post("/accounts/batch-check-subscription")
 def batch_check_subscription(request: BatchCheckSubscriptionRequest):
     """批量检测账号订阅状态"""
-    proxy = request.proxy or get_settings().proxy_url
-
     results = {"success_count": 0, "failed_count": 0, "details": []}
 
     with get_db() as db:
+        proxy = request.proxy or get_settings().get_proxy_url(db=db)
         ids = resolve_account_ids(
             db, request.ids, request.select_all,
             request.status_filter, request.email_service_filter, request.search_filter
@@ -178,5 +177,53 @@ def mark_subscription(account_id: int, request: MarkSubscriptionRequest):
         db.commit()
 
     return {"success": True, "subscription_type": request.subscription_type}
+
+# ============== 国家/货币配置 ==============
+
+_countries_cache: dict = {}  # {"data": [...], "expires_at": float}
+
+
+@router.get("/countries")
+def get_checkout_countries():
+    """从 ChatGPT checkout 接口获取支持的国家/货币列表（缓存 1 小时）"""
+    import time
+    import curl_cffi.requests as cffi_requests
+
+    now = time.time()
+    if _countries_cache.get("expires_at", 0) > now:
+        return {"success": True, "countries": _countries_cache["data"]}
+
+    with get_db() as db:
+        proxy = get_settings().get_proxy_url(db=db)
+
+    try:
+        resp = cffi_requests.get(
+            "https://chatgpt.com/backend-api/checkout_pricing_config/countries",
+            proxies={"http": proxy, "https": proxy} if proxy else None,
+            timeout=15,
+            impersonate="chrome110",
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        countries = data if isinstance(data, list) else data.get("countries", [])
+        _countries_cache["data"] = countries
+        _countries_cache["expires_at"] = now + 3600
+        return {"success": True, "countries": countries}
+    except Exception as e:
+        logger.warning(f"获取国家列表失败: {e}")
+        fallback = [
+            {"country_code": "SG", "currency": "SGD", "country_name": "Singapore"},
+            {"country_code": "US", "currency": "USD", "country_name": "United States"},
+            {"country_code": "TR", "currency": "TRY", "country_name": "Turkey"},
+            {"country_code": "JP", "currency": "JPY", "country_name": "Japan"},
+            {"country_code": "HK", "currency": "HKD", "country_name": "Hong Kong"},
+            {"country_code": "GB", "currency": "GBP", "country_name": "United Kingdom"},
+            {"country_code": "AU", "currency": "AUD", "country_name": "Australia"},
+            {"country_code": "CA", "currency": "CAD", "country_name": "Canada"},
+            {"country_code": "IN", "currency": "INR", "country_name": "India"},
+            {"country_code": "BR", "currency": "BRL", "country_name": "Brazil"},
+            {"country_code": "MX", "currency": "MXN", "country_name": "Mexico"},
+        ]
+        return {"success": False, "countries": fallback, "error": str(e)}
 
 

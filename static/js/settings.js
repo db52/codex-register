@@ -32,6 +32,11 @@ const elements = {
     addProxyBtn: document.getElementById('add-proxy-btn'),
     testAllProxiesBtn: document.getElementById('test-all-proxies-btn'),
     deleteDisabledProxiesBtn: document.getElementById('delete-disabled-proxies-btn'),
+    batchImportProxyBtn: document.getElementById('batch-import-proxy-btn'),
+    batchImportProxyModal: document.getElementById('batch-import-proxy-modal'),
+    closeBatchImportProxyModal: document.getElementById('close-batch-import-proxy-modal'),
+    cancelBatchImportProxyBtn: document.getElementById('cancel-batch-import-proxy-btn'),
+    confirmBatchImportProxyBtn: document.getElementById('confirm-batch-import-proxy-btn'),
     addProxyModal: document.getElementById('add-proxy-modal'),
     proxyItemForm: document.getElementById('proxy-item-form'),
     closeProxyModal: document.getElementById('close-proxy-modal'),
@@ -209,6 +214,38 @@ function initEventListeners() {
     // 代理列表相关
     if (elements.addProxyBtn) {
         elements.addProxyBtn.addEventListener('click', () => openProxyModal());
+    }
+
+    if (elements.batchImportProxyBtn) {
+        elements.batchImportProxyBtn.addEventListener('click', () => {
+            document.getElementById('batch-import-proxy-data').value = '';
+            document.getElementById('batch-import-proxy-result').innerHTML = '';
+            elements.batchImportProxyModal.classList.add('active');
+        });
+    }
+
+    if (elements.closeBatchImportProxyModal) {
+        elements.closeBatchImportProxyModal.addEventListener('click', () => {
+            elements.batchImportProxyModal.classList.remove('active');
+        });
+    }
+
+    if (elements.cancelBatchImportProxyBtn) {
+        elements.cancelBatchImportProxyBtn.addEventListener('click', () => {
+            elements.batchImportProxyModal.classList.remove('active');
+        });
+    }
+
+    if (elements.confirmBatchImportProxyBtn) {
+        elements.confirmBatchImportProxyBtn.addEventListener('click', handleBatchImportProxies);
+    }
+
+    if (elements.batchImportProxyModal) {
+        elements.batchImportProxyModal.addEventListener('click', (e) => {
+            if (e.target === elements.batchImportProxyModal) {
+                elements.batchImportProxyModal.classList.remove('active');
+            }
+        });
     }
 
     if (elements.testAllProxiesBtn) {
@@ -833,7 +870,7 @@ function renderProxies(proxies) {
             <td><code>${escapeHtml(proxy.host)}:${proxy.port}</code></td>
             <td>
                 ${proxy.is_default
-                    ? '<span class="status-badge active">默认</span>'
+                    ? `<button class="btn btn-ghost btn-sm" onclick="handleUnsetProxyDefault(${proxy.id})" title="取消默认">取消默认</button>`
                     : `<button class="btn btn-ghost btn-sm" onclick="handleSetProxyDefault(${proxy.id})" title="设为默认">设默认</button>`
                 }
             </td>
@@ -847,7 +884,10 @@ function renderProxies(proxies) {
                         <div class="dropdown-menu" style="min-width:80px;">
                             <a href="#" class="dropdown-item" onclick="event.preventDefault();closeSettingsMoreMenu(this);testProxyItem(${proxy.id})">测试</a>
                             <a href="#" class="dropdown-item" onclick="event.preventDefault();closeSettingsMoreMenu(this);toggleProxyItem(${proxy.id}, ${!proxy.enabled})">${proxy.enabled ? '禁用' : '启用'}</a>
-                            ${!proxy.is_default ? `<a href="#" class="dropdown-item" onclick="event.preventDefault();closeSettingsMoreMenu(this);handleSetProxyDefault(${proxy.id})">设为默认</a>` : ''}
+                            ${proxy.is_default
+                                ? `<a href="#" class="dropdown-item" onclick="event.preventDefault();closeSettingsMoreMenu(this);handleUnsetProxyDefault(${proxy.id})">取消默认</a>`
+                                : `<a href="#" class="dropdown-item" onclick="event.preventDefault();closeSettingsMoreMenu(this);handleSetProxyDefault(${proxy.id})">设为默认</a>`
+                            }
                         </div>
                     </div>
                     <button class="btn btn-danger btn-sm" onclick="deleteProxyItem(${proxy.id})">删除</button>
@@ -877,6 +917,36 @@ async function handleSetProxyDefault(id) {
         loadProxies();
     } catch (error) {
         toast.error('操作失败: ' + error.message);
+    }
+}
+
+// 取消默认代理
+async function handleUnsetProxyDefault(id) {
+    try {
+        await api.post(`/settings/proxies/${id}/unset-default`);
+        toast.success('已取消默认代理');
+        loadProxies();
+    } catch (error) {
+        toast.error('操作失败: ' + error.message);
+    }
+}
+
+// 批量导入代理
+async function handleBatchImportProxies() {
+    const lines = document.getElementById('batch-import-proxy-data').value;
+    const resultEl = document.getElementById('batch-import-proxy-result');
+    if (!lines.trim()) {
+        resultEl.innerHTML = '<span style="color:var(--color-warning)">请输入代理数据</span>';
+        return;
+    }
+    try {
+        const result = await api.post('/settings/proxies/batch-import', { lines });
+        const color = result.failed > 0 ? 'var(--color-warning)' : 'var(--color-success)';
+        resultEl.innerHTML = `<span style="color:${color}">导入成功 ${result.success} 条，失败 ${result.failed} 条。</span>`
+            + (result.errors.length ? '<br><pre style="font-size:0.8rem;margin-top:4px;">' + result.errors.join('\n') + '</pre>' : '');
+        if (result.success > 0) await loadProxies();
+    } catch (error) {
+        resultEl.innerHTML = `<span style="color:var(--color-danger)">导入失败: ${error.message}</span>`;
     }
 }
 

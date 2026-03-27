@@ -135,7 +135,7 @@ def _get_proxy(request_proxy: Optional[str] = None) -> Optional[str]:
     proxy_url = get_proxy_url_for_task()
     if proxy_url:
         return proxy_url
-    return get_settings().proxy_url
+    return get_settings().get_proxy_url()
 
 
 # ============== Pydantic Models ==============

@@ -608,6 +608,94 @@ async def set_proxy_default(proxy_id: int):
         return {"success": True, "proxy": proxy.to_dict()}
 
 
+@router.post("/proxies/{proxy_id}/unset-default")
+async def unset_proxy_default(proxy_id: int):
+    """取消指定代理的默认标记"""
+    with get_db() as db:
+        proxy = crud.unset_proxy_default(db, proxy_id)
+        if not proxy:
+            raise HTTPException(status_code=404, detail="代理不存在")
+        return {"success": True, "proxy": proxy.to_dict()}
+
+
+class ProxyBatchImportRequest(BaseModel):
+    """批量导入代理请求"""
+    lines: str
+
+
+def _parse_proxy_line(line: str):
+    """
+    解析单行代理字符串，支持格式：
+    - host:port
+    - type://host:port
+    - type://user:pass@host:port
+    - 名称|type://user:pass@host:port
+    """
+    from urllib.parse import urlparse
+
+    name = None
+    # 解析可选名称前缀（竖线分隔）
+    if '|' in line:
+        name, line = line.split('|', 1)
+        name = name.strip()
+        line = line.strip()
+
+    # 若没有协议头，默认补 http://
+    if '://' not in line:
+        line = 'http://' + line
+
+    parsed = urlparse(line)
+    proxy_type = (parsed.scheme or 'http').lower()
+    if proxy_type not in ('http', 'https', 'socks5', 'socks4'):
+        proxy_type = 'http'
+
+    host = parsed.hostname
+    port = parsed.port
+    username = parsed.username or None
+    password = parsed.password or None
+
+    if not host or not port:
+        raise ValueError(f"无法解析 host/port")
+
+    if not name:
+        name = f"{proxy_type}://{host}:{port}"
+
+    return name, proxy_type, host, port, username, password
+
+
+@router.post("/proxies/batch-import")
+async def batch_import_proxies(request: ProxyBatchImportRequest):
+    """
+    批量导入代理，每行格式支持：
+    - host:port
+    - type://host:port
+    - type://user:pass@host:port
+    - 名称|type://user:pass@host:port
+    """
+    results = {"success": 0, "failed": 0, "errors": []}
+    with get_db() as db:
+        for raw_line in request.lines.splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            try:
+                name, proxy_type, host, port, username, password = _parse_proxy_line(line)
+                crud.create_proxy(
+                    db,
+                    name=name,
+                    type=proxy_type,
+                    host=host,
+                    port=port,
+                    username=username,
+                    password=password,
+                )
+                results["success"] += 1
+            except Exception as e:
+                results["failed"] += 1
+                results["errors"].append(f"{raw_line}: {e}")
+    return results
+
+
 @router.post("/proxies/{proxy_id}/test")
 async def test_proxy_item(proxy_id: int):
     """测试单个代理"""

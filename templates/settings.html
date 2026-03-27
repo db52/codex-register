@@ -96,6 +96,7 @@
                         <div style="display: flex; gap: var(--spacing-sm);">
                             <button class="btn btn-secondary btn-sm" id="test-all-proxies-btn">🔌 测试全部</button>
                             <button class="btn btn-danger btn-sm" id="delete-disabled-proxies-btn" disabled>🧹 删除禁用项</button>
+                            <button class="btn btn-secondary btn-sm" id="batch-import-proxy-btn">📋 批量导入</button>
                             <button class="btn btn-primary btn-sm" id="add-proxy-btn">➕ 添加代理</button>
                         </div>
                     </div>
@@ -148,6 +149,28 @@
                                 <button type="submit" class="btn btn-primary">💾 保存设置</button>
                             </div>
                         </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 批量导入代理模态框 -->
+            <div class="modal" id="batch-import-proxy-modal">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h3>批量导入代理</h3>
+                        <button class="modal-close" id="close-batch-import-proxy-modal">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <p class="text-muted" style="margin-bottom: var(--spacing-sm); font-size: 0.875rem;">每行一条，支持格式：<code>host:port</code>、<code>type://host:port</code>、<code>type://user:pass@host:port</code>、<code>名称|type://user:pass@host:port</code></p>
+                        <textarea id="batch-import-proxy-data" rows="10" style="width:100%;font-family:monospace;font-size:0.85rem;" placeholder="127.0.0.1:7890
+socks5://127.0.0.1:1080
+http://user:pass@host:port
+MyProxy|socks5://user:pass@host:port"></textarea>
+                        <div id="batch-import-proxy-result" style="margin-top: var(--spacing-sm); font-size: 0.875rem;"></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-ghost" id="cancel-batch-import-proxy-btn">取消</button>
+                        <button class="btn btn-primary" id="confirm-batch-import-proxy-btn">导入</button>
                     </div>
                 </div>
             </div>

@@ -579,6 +579,16 @@ def set_proxy_default(db: Session, proxy_id: int) -> Optional[Proxy]:
     return proxy
 
 
+def unset_proxy_default(db: Session, proxy_id: int) -> Optional[Proxy]:
+    """取消指定代理的默认标记"""
+    proxy = db.query(Proxy).filter(Proxy.id == proxy_id).first()
+    if proxy:
+        proxy.is_default = False
+        db.commit()
+        db.refresh(proxy)
+    return proxy
+
+
 def get_proxies_count(db: Session, enabled: Optional[bool] = None) -> int:
     """获取代理数量"""
     query = db.query(func.count(Proxy.id))

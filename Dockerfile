@@ -26,7 +26,8 @@ RUN apt-get update \
 # 复制依赖文件并安装
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt
+    && pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-cache-dir 'starlette<1.0.0'
 
 # 复制项目代码
 COPY . .

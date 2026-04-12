@@ -32,6 +32,8 @@ from ..task_manager import task_manager
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+ALLOWED_EXECUTION_MODES = {"curl_cffi", "playwright"}
+
 # 任务存储（简单的内存存储，生产环境应使用 Redis）
 running_tasks: dict = {}
 email_service_circuit_breakers: Dict[int, EmailProviderBackoffState] = {}
@@ -113,6 +115,7 @@ def disable_proxy_for_network_error(db, proxy_id: Optional[int], reason: str) ->
 class RegistrationTaskCreate(BaseModel):
     """创建注册任务请求"""
     email_service_type: str = "tempmail"
+    execution_mode: str = "curl_cffi"
     proxy: Optional[str] = None
     email_service_config: Optional[dict] = None
     email_service_id: Optional[int] = None
@@ -130,6 +133,7 @@ class BatchRegistrationRequest(BaseModel):
     """批量注册请求"""
     count: int = 1
     email_service_type: str = "tempmail"
+    execution_mode: str = "curl_cffi"
     proxy: Optional[str] = None
     email_service_config: Optional[dict] = None
     email_service_id: Optional[int] = None
@@ -215,6 +219,7 @@ class OutlookAccountsListResponse(BaseModel):
 class OutlookBatchRegistrationRequest(BaseModel):
     """Outlook 批量注册请求"""
     service_ids: List[int]
+    execution_mode: str = "curl_cffi"
     skip_registered: bool = True
     proxy: Optional[str] = None
     interval_min: int = 5
@@ -308,303 +313,17 @@ def _normalize_email_service_config(
     return normalized
 
 
-def _get_email_service_backoff_state(service_id: Optional[int]) -> EmailProviderBackoffState:
-    if service_id is None:
-        return EmailProviderBackoffState()
-    return email_service_circuit_breakers.get(service_id, EmailProviderBackoffState())
+def _validate_execution_mode(execution_mode: str) -> str:
+    mode = (execution_mode or "curl_cffi").strip().lower()
+    if mode == "playwright":
+        logger.warning("Playwright execution mode is disabled; falling back to curl_cffi")
+        return "curl_cffi"
+    if mode not in ALLOWED_EXECUTION_MODES:
+        raise HTTPException(status_code=400, detail=f"无效的执行方式: {execution_mode}")
+    return mode
 
 
-def _store_email_service_backoff_state(
-    service_id: Optional[int],
-    backoff_state: Optional[EmailProviderBackoffState],
-) -> Optional[EmailProviderBackoffState]:
-    if service_id is None or backoff_state is None:
-        return None
-    if backoff_state.failures == 0 and backoff_state.delay_seconds == 0:
-        email_service_circuit_breakers.pop(service_id, None)
-        return backoff_state
-    email_service_circuit_breakers[service_id] = backoff_state
-    return backoff_state
-
-
-def _get_phase_result(phase_history, phase_name: str):
-    for phase_result in phase_history or []:
-        if getattr(phase_result, "phase", None) == phase_name:
-            return phase_result
-    return None
-
-
-def _is_email_service_circuit_open(service_id: Optional[int], now: Optional[float] = None) -> bool:
-    if service_id is None:
-        return False
-    return _get_email_service_backoff_state(service_id).is_open(now)
-
-
-def _trip_email_service_circuit(
-    service_id: Optional[int],
-    backoff_state: Optional[EmailProviderBackoffState],
-) -> int:
-    if service_id is None or backoff_state is None:
-        return 0
-    _store_email_service_backoff_state(service_id, backoff_state)
-    return backoff_state.delay_seconds
-
-
-def _record_email_service_timeout_backoff(
-    service_id: Optional[int],
-    email_service,
-    previous_backoff_state: EmailProviderBackoffState,
-    error_code: str,
-    error_message: str,
-) -> Optional[EmailProviderBackoffState]:
-    if service_id is None:
-        return None
-
-    timeout_error = OTPTimeoutEmailServiceError(
-        error_message or "等待验证码超时",
-        error_code=error_code,
-    )
-    if hasattr(email_service, "apply_provider_backoff_state"):
-        email_service.apply_provider_backoff_state(previous_backoff_state)
-    if hasattr(email_service, "update_status"):
-        email_service.update_status(False, timeout_error)
-    backoff_state = getattr(email_service, "provider_backoff_state", None)
-    return _store_email_service_backoff_state(service_id, backoff_state)
-
-
-def _run_registration_engine_attempt(
-    task_uuid: str,
-    email_service,
-    actual_proxy_url: Optional[str],
-    log_callback,
-    db_service,
-    status_callback=None,
-):
-    """执行单次注册引擎尝试，并在同一临界区内维护邮箱服务退避状态。"""
-    provider_backoff_before_run = EmailProviderBackoffState()
-
-    with _email_service_backoff_lock:
-        if db_service is not None:
-            provider_backoff_before_run = _get_email_service_backoff_state(db_service.id)
-            if hasattr(email_service, "apply_provider_backoff_state"):
-                email_service.apply_provider_backoff_state(provider_backoff_before_run)
-
-        engine = RegistrationEngine(
-            email_service=email_service,
-            proxy_url=actual_proxy_url,
-            callback_logger=log_callback,
-            status_callback=status_callback,
-            task_uuid=task_uuid,
-        )
-        create_cancel_callback = getattr(task_manager, "create_check_cancelled_callback", None)
-        if callable(create_cancel_callback):
-            setattr(engine, "check_cancelled", create_cancel_callback(task_uuid))
-        else:
-            setattr(engine, "check_cancelled", lambda: False)
-
-        try:
-            result = engine.run()
-        finally:
-            close_engine = getattr(engine, "close", None)
-            if callable(close_engine):
-                close_engine()
-
-        email_prepare_phase = _get_phase_result(
-            getattr(engine, "phase_history", []),
-            "email_prepare",
-        )
-        if db_service is not None and email_prepare_phase is not None:
-            _store_email_service_backoff_state(
-                db_service.id,
-                getattr(email_prepare_phase, "provider_backoff", None),
-            )
-
-        if (
-            db_service is not None
-            and not result.success
-            and result.error_code == ERROR_OTP_TIMEOUT_SECONDARY
-        ):
-            timeout_backoff = _record_email_service_timeout_backoff(
-                db_service.id,
-                email_service,
-                provider_backoff_before_run,
-                result.error_code,
-                result.error_message,
-            )
-        else:
-            timeout_backoff = None
-
-    return engine, result, email_prepare_phase, provider_backoff_before_run, timeout_backoff
-
-
-def _get_batch_snapshot(batch_id: str) -> Optional[dict]:
-    return task_manager.get_batch_status(batch_id)
-
-
-def _finalize_task_cancelled(
-    db,
-    task_uuid: str,
-    message: str = "任务已取消",
-    *,
-    email_service: Optional[str] = None,
-):
-    """将任务统一收敛为已取消状态。"""
-    crud.update_registration_task(
-        db,
-        task_uuid,
-        status="cancelled",
-        completed_at=datetime.utcnow(),
-        error_message=message,
-    )
-    status_kwargs = {"error": message, "cancelled": True}
-    if email_service:
-        status_kwargs["email_service"] = email_service
-    task_manager.update_status(task_uuid, "cancelled", **status_kwargs)
-
-
-def _request_task_cancellation(db, task_uuid: str, message: str = "任务已取消"):
-    """向运行中的任务发送取消信号，并持久化取消状态。"""
-    task_manager.cancel_task(task_uuid)
-    _finalize_task_cancelled(db, task_uuid, message)
-
-
-def _request_batch_cancellation(batch_id: str, message: str = "批量任务取消请求已提交"):
-    """向批量任务及其成员任务传播取消信号。"""
-    batch = _require_batch_snapshot(batch_id)
-    if batch.get("finished"):
-        raise HTTPException(status_code=400, detail="批量任务已完成")
-
-    task_manager.cancel_batch(batch_id)
-    task_manager.update_batch_status(batch_id, status="cancelled", cancelled=True)
-
-    with get_db() as db:
-        for task_uuid in batch.get("task_uuids", []):
-            task_manager.cancel_task(task_uuid)
-            task = crud.get_registration_task(db, task_uuid)
-            if task and task.status in ["pending", "running"]:
-                _finalize_task_cancelled(db, task_uuid, "任务已取消")
-
-    return {"success": True, "message": message}
-
-
-def _require_batch_snapshot(batch_id: str) -> dict:
-    batch = _get_batch_snapshot(batch_id)
-    if batch is None:
-        raise HTTPException(status_code=404, detail="批量任务不存在")
-    return batch
-
-
-def _build_email_service_candidates(
-    db,
-    service_type: EmailServiceType,
-    actual_proxy_url: Optional[str],
-    email_service_id: Optional[int],
-    email_service_config: Optional[dict],
-) -> List[Dict[str, object]]:
-    from ...database.models import EmailService as EmailServiceModel, Account
-
-    settings = get_settings()
-    candidates: List[Dict[str, object]] = []
-
-    def append_candidate(candidate_type: EmailServiceType, config: dict, db_service=None) -> None:
-        candidates.append({
-            "service_type": candidate_type,
-            "config": config,
-            "db_service": db_service,
-        })
-
-    def append_database_candidates(db_service_type: str) -> None:
-        services = db.query(EmailServiceModel).filter(
-            EmailServiceModel.service_type == db_service_type,
-            EmailServiceModel.enabled == True
-        ).order_by(EmailServiceModel.priority.asc(), EmailServiceModel.id.asc()).all()
-
-        for db_service in services:
-            if _is_email_service_circuit_open(db_service.id):
-                continue
-            candidate_type = EmailServiceType(db_service.service_type)
-            config = _normalize_email_service_config(candidate_type, db_service.config, actual_proxy_url)
-            append_candidate(candidate_type, config, db_service=db_service)
-
-    if email_service_id:
-        db_service = db.query(EmailServiceModel).filter(
-            EmailServiceModel.id == email_service_id,
-            EmailServiceModel.enabled == True
-        ).first()
-        if not db_service:
-            raise ValueError(f"邮箱服务不存在或已禁用: {email_service_id}")
-        if _is_email_service_circuit_open(db_service.id):
-            raise ValueError(f"邮箱服务处于熔断状态: {db_service.name}")
-        candidate_type = EmailServiceType(db_service.service_type)
-        config = _normalize_email_service_config(candidate_type, db_service.config, actual_proxy_url)
-        append_candidate(candidate_type, config, db_service=db_service)
-        return candidates
-
-    if service_type == EmailServiceType.TEMPMAIL:
-        append_candidate(service_type, {
-            "base_url": settings.tempmail_base_url,
-            "timeout": settings.tempmail_timeout,
-            "max_retries": settings.tempmail_max_retries,
-            "proxy_url": actual_proxy_url,
-        })
-    elif service_type == EmailServiceType.MOE_MAIL:
-        append_database_candidates("moe_mail")
-        if not candidates:
-            if settings.custom_domain_base_url and settings.custom_domain_api_key:
-                append_candidate(service_type, {
-                    "base_url": settings.custom_domain_base_url,
-                    "api_key": settings.custom_domain_api_key.get_secret_value() if settings.custom_domain_api_key else "",
-                    "proxy_url": actual_proxy_url,
-                })
-            else:
-                raise ValueError("没有可用的自定义域名邮箱服务，请先在设置中配置")
-    elif service_type == EmailServiceType.OUTLOOK:
-        services = db.query(EmailServiceModel).filter(
-            EmailServiceModel.service_type == "outlook",
-            EmailServiceModel.enabled == True
-        ).order_by(EmailServiceModel.priority.asc(), EmailServiceModel.id.asc()).all()
-
-        if not services:
-            raise ValueError("没有可用的 Outlook 账户，请先在设置中导入账户")
-
-        for db_service in services:
-            if _is_email_service_circuit_open(db_service.id):
-                continue
-            email = db_service.config.get("email") if db_service.config else None
-            if not email:
-                continue
-            existing = db.query(Account).filter(Account.email == email).first()
-            if existing:
-                logger.info(f"跳过已注册的 Outlook 账户: {email}")
-                continue
-            config = _normalize_email_service_config(service_type, db_service.config, actual_proxy_url)
-            append_candidate(service_type, config, db_service=db_service)
-
-        if not candidates:
-            raise ValueError("所有 Outlook 账户都已注册过，或当前均处于熔断状态")
-    elif service_type == EmailServiceType.DUCK_MAIL:
-        append_database_candidates("duck_mail")
-        if not candidates:
-            raise ValueError("没有可用的 DuckMail 邮箱服务，请先在邮箱服务页面添加服务")
-    elif service_type == EmailServiceType.FREEMAIL:
-        append_database_candidates("freemail")
-        if not candidates:
-            raise ValueError("没有可用的 Freemail 邮箱服务，请先在邮箱服务页面添加服务")
-    elif service_type == EmailServiceType.IMAP_MAIL:
-        append_database_candidates("imap_mail")
-        if not candidates:
-            raise ValueError("没有可用的 IMAP 邮箱服务，请先在邮箱服务中添加")
-    elif service_type == EmailServiceType.CLOUD_MAIL:
-        append_database_candidates("cloud_mail")
-        if not candidates:
-            raise ValueError("没有可用的 Cloud Mail 邮箱服务，请先在邮箱服务页面添加服务")
-    else:
-        append_candidate(service_type, email_service_config or {})
-
-    return candidates
-
-
-def _run_sync_registration_task(task_uuid: str, email_service_type: str, proxy: Optional[str], email_service_config: Optional[dict], email_service_id: Optional[int] = None, log_prefix: str = "", batch_id: str = "", auto_upload_cpa: bool = False, cpa_service_ids: List[int] = None, auto_upload_sub2api: bool = False, sub2api_service_ids: List[int] = None, auto_upload_tm: bool = False, tm_service_ids: List[int] = None, auto_upload_newapi: bool = False, newapi_service_ids: List[int] = None):
+def _run_sync_registration_task(task_uuid: str, email_service_type: str, execution_mode: str, proxy: Optional[str], email_service_config: Optional[dict], email_service_id: Optional[int] = None, log_prefix: str = "", batch_id: str = "", auto_upload_cpa: bool = False, cpa_service_ids: List[int] = None, auto_upload_sub2api: bool = False, sub2api_service_ids: List[int] = None, auto_upload_tm: bool = False, tm_service_ids: List[int] = None):
     """
     在线程池中执行的同步注册任务
 
@@ -782,7 +501,21 @@ def _run_sync_registration_task(task_uuid: str, email_service_type: str, proxy: 
                         log_callback(f"[代理] 切换到新代理后重试注册: {next_proxy_url[:50]}...")
                         continue
 
-                break
+            email_service = EmailServiceFactory.create(service_type, config)
+
+            # 创建注册引擎 - 使用 TaskManager 的日志回调
+            log_callback = task_manager.create_log_callback(task_uuid, prefix=log_prefix, batch_id=batch_id)
+
+            engine = RegistrationEngine(
+                email_service=email_service,
+                proxy_url=actual_proxy_url,
+                callback_logger=log_callback,
+                task_uuid=task_uuid,
+                execution_mode=execution_mode,
+            )
+
+            # 执行注册
+            result = engine.run()
 
             if result.success:
                 if cancellation_requested():
@@ -991,7 +724,7 @@ def _run_sync_registration_task(task_uuid: str, email_service_type: str, proxy: 
                 pass
 
 
-async def run_registration_task(task_uuid: str, email_service_type: str, proxy: Optional[str], email_service_config: Optional[dict], email_service_id: Optional[int] = None, log_prefix: str = "", batch_id: str = "", auto_upload_cpa: bool = False, cpa_service_ids: List[int] = None, auto_upload_sub2api: bool = False, sub2api_service_ids: List[int] = None, auto_upload_tm: bool = False, tm_service_ids: List[int] = None, auto_upload_newapi: bool = False, newapi_service_ids: List[int] = None):
+async def run_registration_task(task_uuid: str, email_service_type: str, execution_mode: str, proxy: Optional[str], email_service_config: Optional[dict], email_service_id: Optional[int] = None, log_prefix: str = "", batch_id: str = "", auto_upload_cpa: bool = False, cpa_service_ids: List[int] = None, auto_upload_sub2api: bool = False, sub2api_service_ids: List[int] = None, auto_upload_tm: bool = False, tm_service_ids: List[int] = None):
     """
     异步执行注册任务
 
@@ -1018,6 +751,7 @@ async def run_registration_task(task_uuid: str, email_service_type: str, proxy: 
             _run_sync_registration_task,
             task_uuid,
             email_service_type,
+            execution_mode,
             proxy,
             email_service_config,
             email_service_id,
@@ -1327,6 +1061,7 @@ async def run_batch_parallel(
     batch_id: str,
     task_uuids: List[str],
     email_service_type: str,
+    execution_mode: str,
     proxy: Optional[str],
     email_service_config: Optional[dict],
     email_service_id: Optional[int],
@@ -1353,7 +1088,7 @@ async def run_batch_parallel(
         prefix = f"[任务{idx + 1}]"
         async with semaphore:
             await run_registration_task(
-                uuid, email_service_type, proxy, email_service_config, email_service_id,
+                uuid, email_service_type, execution_mode, proxy, email_service_config, email_service_id,
                 log_prefix=prefix, batch_id=batch_id,
                 auto_upload_cpa=auto_upload_cpa, cpa_service_ids=cpa_service_ids or [],
                 auto_upload_sub2api=auto_upload_sub2api, sub2api_service_ids=sub2api_service_ids or [],
@@ -1397,6 +1132,7 @@ async def run_batch_pipeline(
     batch_id: str,
     task_uuids: List[str],
     email_service_type: str,
+    execution_mode: str,
     proxy: Optional[str],
     email_service_config: Optional[dict],
     email_service_id: Optional[int],
@@ -1425,7 +1161,7 @@ async def run_batch_pipeline(
     async def _run_and_release(idx: int, uuid: str, pfx: str):
         try:
             await run_registration_task(
-                uuid, email_service_type, proxy, email_service_config, email_service_id,
+                uuid, email_service_type, execution_mode, proxy, email_service_config, email_service_id,
                 log_prefix=pfx, batch_id=batch_id,
                 auto_upload_cpa=auto_upload_cpa, cpa_service_ids=cpa_service_ids or [],
                 auto_upload_sub2api=auto_upload_sub2api, sub2api_service_ids=sub2api_service_ids or [],
@@ -1492,6 +1228,7 @@ async def run_batch_registration(
     batch_id: str,
     task_uuids: List[str],
     email_service_type: str,
+    execution_mode: str,
     proxy: Optional[str],
     email_service_config: Optional[dict],
     email_service_id: Optional[int],
@@ -1511,7 +1248,7 @@ async def run_batch_registration(
     """根据 mode 分发到并行或流水线执行"""
     if mode == "parallel":
         await run_batch_parallel(
-            batch_id, task_uuids, email_service_type, proxy,
+            batch_id, task_uuids, email_service_type, execution_mode, proxy,
             email_service_config, email_service_id, concurrency,
             auto_upload_cpa=auto_upload_cpa, cpa_service_ids=cpa_service_ids,
             auto_upload_sub2api=auto_upload_sub2api, sub2api_service_ids=sub2api_service_ids,
@@ -1520,7 +1257,7 @@ async def run_batch_registration(
         )
     else:
         await run_batch_pipeline(
-            batch_id, task_uuids, email_service_type, proxy,
+            batch_id, task_uuids, email_service_type, execution_mode, proxy,
             email_service_config, email_service_id,
             interval_min, interval_max, concurrency,
             auto_upload_cpa=auto_upload_cpa, cpa_service_ids=cpa_service_ids,
@@ -1601,6 +1338,7 @@ async def start_registration(
             status_code=400,
             detail=f"无效的邮箱服务类型: {request.email_service_type}"
         )
+    execution_mode = _validate_execution_mode(request.execution_mode)
 
     # 创建任务
     task_uuid = str(uuid.uuid4())
@@ -1617,6 +1355,7 @@ async def start_registration(
         run_registration_task,
         task_uuid,
         request.email_service_type,
+        execution_mode,
         request.proxy,
         request.email_service_config,
         request.email_service_id,
@@ -1660,6 +1399,7 @@ async def start_batch_registration(
             status_code=400,
             detail=f"无效的邮箱服务类型: {request.email_service_type}"
         )
+    execution_mode = _validate_execution_mode(request.execution_mode)
 
     if request.interval_min < 0 or request.interval_max < request.interval_min:
         raise HTTPException(status_code=400, detail="间隔时间参数无效")
@@ -1694,6 +1434,7 @@ async def start_batch_registration(
         batch_id,
         task_uuids,
         request.email_service_type,
+        execution_mode,
         request.proxy,
         request.email_service_config,
         request.email_service_id,
@@ -2112,6 +1853,7 @@ async def get_outlook_accounts_for_registration():
 async def run_outlook_batch_registration(
     batch_id: str,
     service_ids: List[int],
+    execution_mode: str,
     skip_registered: bool,
     proxy: Optional[str],
     interval_min: int,
@@ -2156,6 +1898,7 @@ async def run_outlook_batch_registration(
         batch_id=batch_id,
         task_uuids=task_uuids,
         email_service_type="outlook",
+        execution_mode=execution_mode,
         proxy=proxy,
         email_service_config=None,
         email_service_id=None,   # 每个任务已绑定了独立的 email_service_id
@@ -2203,6 +1946,7 @@ async def start_outlook_batch_registration(
 
     if request.mode not in ("parallel", "pipeline"):
         raise HTTPException(status_code=400, detail="模式必须为 parallel 或 pipeline")
+    execution_mode = _validate_execution_mode(request.execution_mode)
 
     # 过滤掉已注册的邮箱
     actual_service_ids = request.service_ids
@@ -2257,6 +2001,7 @@ async def start_outlook_batch_registration(
         run_outlook_batch_registration,
         batch_id,
         actual_service_ids,
+        execution_mode,
         request.skip_registered,
         request.proxy,
         request.interval_min,

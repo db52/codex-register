@@ -38,7 +38,7 @@ class EmailServiceType(str, Enum):
     DUCK_MAIL = "duck_mail"
     FREEMAIL = "freemail"
     IMAP_MAIL = "imap_mail"
-    CLOUD_MAIL = "cloud_mail"
+    YYDS_MAIL = "yyds_mail"
 
 
 # ============================================================================
@@ -48,25 +48,6 @@ class EmailServiceType(str, Enum):
 APP_NAME = "OpenAI/Codex CLI 自动注册系统"
 APP_VERSION = "2.0.0"
 APP_DESCRIPTION = "自动注册 OpenAI/Codex CLI 账号的系统"
-DEFAULT_WEBUI_HOST = "0.0.0.0"
-DEFAULT_WEBUI_PORT = 15555
-DEFAULT_WEBUI_LOCAL_HOST = "127.0.0.1"
-
-
-def build_http_url(host: str, port: int, path: str = "") -> str:
-    """构造本地 HTTP URL。"""
-    normalized_path = path if not path or path.startswith("/") else f"/{path}"
-    return f"http://{host}:{port}{normalized_path}"
-
-
-def build_ws_url(host: str, port: int, path: str = "") -> str:
-    """构造本地 WebSocket URL。"""
-    normalized_path = path if not path or path.startswith("/") else f"/{path}"
-    return f"ws://{host}:{port}{normalized_path}"
-
-
-DEFAULT_WEBUI_BASE_URL = build_http_url(DEFAULT_WEBUI_LOCAL_HOST, DEFAULT_WEBUI_PORT)
-DEFAULT_WEBUI_WS_BASE_URL = build_ws_url(DEFAULT_WEBUI_LOCAL_HOST, DEFAULT_WEBUI_PORT)
 
 # ============================================================================
 # OpenAI OAuth 相关常量
@@ -76,13 +57,8 @@ DEFAULT_WEBUI_WS_BASE_URL = build_ws_url(DEFAULT_WEBUI_LOCAL_HOST, DEFAULT_WEBUI
 OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 OAUTH_AUTH_URL = "https://auth.openai.com/oauth/authorize"
 OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token"
-OAUTH_REDIRECT_URI = build_http_url("localhost", DEFAULT_WEBUI_PORT, "/auth/callback")
+OAUTH_REDIRECT_URI = "http://localhost:15555/auth/callback"
 OAUTH_SCOPE = "openid email profile offline_access"
-
-# Codex CLI 专用 OAuth 参数（用于生成 Codex 兼容的 auth.json）
-CODEX_OAUTH_REDIRECT_URI = "http://localhost:1455/auth/callback"
-CODEX_OAUTH_SCOPE = "openid profile email offline_access api.connectors.read api.connectors.invoke"
-CODEX_OAUTH_ORIGINATOR = "codex_cli_rs"
 
 # OpenAI API 端点
 OPENAI_API_ENDPOINTS = {
@@ -90,15 +66,19 @@ OPENAI_API_ENDPOINTS = {
     "signup": "https://auth.openai.com/api/accounts/authorize/continue",
     "register": "https://auth.openai.com/api/accounts/user/register",
     "send_otp": "https://auth.openai.com/api/accounts/email-otp/send",
+    "passwordless_send_otp": "https://auth.openai.com/api/accounts/passwordless/send-otp",
     "validate_otp": "https://auth.openai.com/api/accounts/email-otp/validate",
     "create_account": "https://auth.openai.com/api/accounts/create_account",
+    "add_phone" : "https://auth.openai.com/add-phone",
     "select_workspace": "https://auth.openai.com/api/accounts/workspace/select",
+    "password_verify" : "https://auth.openai.com/api/accounts/password/verify"
 }
 
 # OpenAI 页面类型（用于判断账号状态）
 OPENAI_PAGE_TYPES = {
+    "LOGIN_PASSWORD": "login_password",
     "EMAIL_OTP_VERIFICATION": "email_otp_verification",  # 已注册账号，需要 OTP 验证
-    "PASSWORD_REGISTRATION": "password",  # 新账号，需要设置密码
+    "PASSWORD_REGISTRATION": "create_account_password",  # 新账号，需要设置密码
 }
 
 # ============================================================================
@@ -164,14 +144,13 @@ EMAIL_SERVICE_DEFAULTS = {
         "timeout": 30,
         "max_retries": 3,
     },
-    "cloud_mail": {
-        "base_url": "",
-        "admin_email": "",
-        "admin_password": "",
+    "yyds_mail": {
+        "base_url": "https://maliapi.215.im/v1",
+        "api_key": "",
         "default_domain": "",
         "timeout": 30,
         "max_retries": 3,
-    },
+    }
 }
 
 # ============================================================================
@@ -299,8 +278,8 @@ DEFAULT_SETTINGS = [
     ("registration.max_retries", "3", "最大重试次数", "registration"),
     ("registration.timeout", "120", "超时时间（秒）", "registration"),
     ("registration.default_password_length", "12", "默认密码长度", "registration"),
-    ("webui.host", DEFAULT_WEBUI_HOST, "Web UI 监听主机", "webui"),
-    ("webui.port", str(DEFAULT_WEBUI_PORT), "Web UI 监听端口", "webui"),
+    ("webui.host", "0.0.0.0", "Web UI 监听主机", "webui"),
+    ("webui.port", "8000", "Web UI 监听端口", "webui"),
     ("webui.debug", "true", "调试模式", "webui"),
 ]
 
@@ -411,20 +390,8 @@ MICROSOFT_TOKEN_ENDPOINTS = {
 }
 
 # IMAP 服务器配置
-OUTLOOK_IMAP_SERVERS = {
-    "OLD": "outlook.office365.com",  # 旧版 IMAP
-    "NEW": "outlook.live.com",       # 新版 IMAP
-}
+OUTLOOK_IMAP_SERVER = "outlook.live.com"
+OUTLOOK_IMAP_PORT = 993
 
-# Microsoft OAuth2 Scopes
-MICROSOFT_SCOPES = {
-    # 旧版 IMAP 不需要特定 scope
-    "IMAP_OLD": "",
-    # 新版 IMAP 需要的 scope
-    "IMAP_NEW": "https://outlook.office.com/IMAP.AccessAsUser.All offline_access",
-    # Graph API 需要的 scope
-    "GRAPH_API": "https://graph.microsoft.com/.default",
-}
-
-# Outlook 提供者默认优先级
-OUTLOOK_PROVIDER_PRIORITY = ["imap_new", "imap_old", "graph_api"]
+# Microsoft OAuth2 Scope（IMAP_NEW）
+OUTLOOK_IMAP_SCOPE = "https://outlook.office.com/IMAP.AccessAsUser.All offline_access"

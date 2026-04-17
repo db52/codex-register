@@ -13,6 +13,7 @@ from .http_client import (
 )
 from .register_browser import BrowserRegistrationArtifacts, BrowserRegistrationRunner
 from .register import RegistrationEngine, RegistrationResult
+from .login import LoginEngine
 from .utils import setup_logging, get_data_dir
 
 __all__ = [
@@ -30,6 +31,7 @@ __all__ = [
     'BrowserRegistrationRunner',
     'RegistrationEngine',
     'RegistrationResult',
+    'LoginEngine',
     'setup_logging',
     'get_data_dir',
 ]

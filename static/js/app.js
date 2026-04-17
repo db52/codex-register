@@ -24,11 +24,8 @@ let availableServices = {
     moe_mail: { available: false, services: [] },
     temp_mail: { available: false, services: [] },
     duck_mail: { available: false, services: [] },
-    freemail: { available: false, services: [] },
-    cloud_mail: { available: false, services: [] }
+    freemail: { available: false, services: [] }
 };
-const EXECUTION_MODE_STORAGE_KEY = 'registrationExecutionMode';
-const ENABLED_EXECUTION_MODE = 'curl_cffi';
 
 // WebSocket 相关变量
 let webSocket = null;
@@ -43,7 +40,6 @@ let activeBatchId = null;    // 当前活跃的批量任务 ID（用于页面重
 const elements = {
     form: document.getElementById('registration-form'),
     emailService: document.getElementById('email-service'),
-    executionMode: document.getElementById('execution-mode'),
     regMode: document.getElementById('reg-mode'),
     regModeGroup: document.getElementById('reg-mode-group'),
     batchCountGroup: document.getElementById('batch-count-group'),
@@ -98,15 +94,11 @@ const elements = {
     autoUploadTm: document.getElementById('auto-upload-tm'),
     tmServiceSelectGroup: document.getElementById('tm-service-select-group'),
     tmServiceSelect: document.getElementById('tm-service-select'),
-    autoUploadNewapi: document.getElementById('auto-upload-newapi'),
-    newapiServiceSelectGroup: document.getElementById('newapi-service-select-group'),
-    newapiServiceSelect: document.getElementById('newapi-service-select'),
 };
 
 // 初始化
 document.addEventListener('DOMContentLoaded', () => {
     initEventListeners();
-    restoreExecutionMode();
     loadAvailableServices();
     loadRecentAccounts();
     startAccountsPolling();
@@ -121,7 +113,6 @@ async function initAutoUploadOptions() {
         loadServiceSelect('/cpa-services?enabled=true', elements.cpaServiceSelect, elements.autoUploadCpa, elements.cpaServiceSelectGroup),
         loadServiceSelect('/sub2api-services?enabled=true', elements.sub2apiServiceSelect, elements.autoUploadSub2api, elements.sub2apiServiceSelectGroup),
         loadServiceSelect('/tm-services?enabled=true', elements.tmServiceSelect, elements.autoUploadTm, elements.tmServiceSelectGroup),
-        loadServiceSelect('/newapi-services?enabled=true', elements.newapiServiceSelect, elements.autoUploadNewapi, elements.newapiServiceSelectGroup),
     ]);
 }
 
@@ -205,10 +196,6 @@ function initEventListeners() {
     // 邮箱服务切换
     elements.emailService.addEventListener('change', handleServiceChange);
 
-    if (elements.executionMode) {
-        elements.executionMode.addEventListener('change', handleExecutionModeChange);
-    }
-
     // 取消按钮
     elements.cancelBtn.addEventListener('click', handleCancelTask);
 
@@ -231,28 +218,6 @@ function initEventListeners() {
     elements.outlookConcurrencyMode.addEventListener('change', () => {
         handleConcurrencyModeChange(elements.outlookConcurrencyMode, elements.outlookConcurrencyHint, elements.outlookIntervalGroup);
     });
-}
-
-function restoreExecutionMode() {
-    if (!elements.executionMode) return;
-    const savedMode = localStorage.getItem(EXECUTION_MODE_STORAGE_KEY);
-    const normalizedMode = savedMode === ENABLED_EXECUTION_MODE ? savedMode : ENABLED_EXECUTION_MODE;
-    elements.executionMode.value = normalizedMode;
-    localStorage.setItem(EXECUTION_MODE_STORAGE_KEY, normalizedMode);
-}
-
-function handleExecutionModeChange(e) {
-    const normalizedMode = e.target.value === ENABLED_EXECUTION_MODE ? e.target.value : ENABLED_EXECUTION_MODE;
-    e.target.value = normalizedMode;
-    localStorage.setItem(EXECUTION_MODE_STORAGE_KEY, normalizedMode);
-}
-
-function getCurrentExecutionMode() {
-    return elements.executionMode ? (elements.executionMode.value || ENABLED_EXECUTION_MODE) : ENABLED_EXECUTION_MODE;
-}
-
-function getExecutionModeFailureHint() {
-    return '';
 }
 
 // 加载可用的邮箱服务
@@ -407,23 +372,6 @@ function updateEmailServiceOptions() {
 
         select.appendChild(optgroup);
     }
-
-    // Cloud Mail
-    if (availableServices.cloud_mail && availableServices.cloud_mail.available) {
-        const optgroup = document.createElement('optgroup');
-        optgroup.label = `☁️ Cloud Mail (${availableServices.cloud_mail.count} 个服务)`;
-
-        availableServices.cloud_mail.services.forEach(service => {
-            const option = document.createElement('option');
-            option.value = `cloud_mail:${service.id}`;
-            option.textContent = service.name + (service.default_domain ? ` (@${service.default_domain})` : '');
-            option.dataset.type = 'cloud_mail';
-            option.dataset.serviceId = service.id;
-            optgroup.appendChild(option);
-        });
-
-        select.appendChild(optgroup);
-    }
 }
 
 // 处理邮箱服务切换
@@ -474,11 +422,6 @@ function handleServiceChange(e) {
         if (service) {
             addLog('info', `[系统] 已选择 Freemail 服务: ${service.name}`);
         }
-    } else if (type === 'cloud_mail') {
-        const service = availableServices.cloud_mail.services.find(s => s.id == id);
-        if (service) {
-            addLog('info', `[系统] 已选择 Cloud Mail 服务: ${service.name}`);
-        }
     }
 }
 
@@ -520,7 +463,6 @@ async function handleStartRegistration(e) {
     }
 
     const [emailServiceType, serviceId] = selectedValue.split(':');
-    const executionMode = getCurrentExecutionMode();
 
     // 禁用开始按钮
     elements.startBtn.disabled = true;
@@ -532,23 +474,18 @@ async function handleStartRegistration(e) {
     // 构建请求数据（代理从设置中自动获取）
     const requestData = {
         email_service_type: emailServiceType,
-        execution_mode: executionMode,
         auto_upload_cpa: elements.autoUploadCpa ? elements.autoUploadCpa.checked : false,
         cpa_service_ids: elements.autoUploadCpa && elements.autoUploadCpa.checked ? getSelectedServiceIds(elements.cpaServiceSelect) : [],
         auto_upload_sub2api: elements.autoUploadSub2api ? elements.autoUploadSub2api.checked : false,
         sub2api_service_ids: elements.autoUploadSub2api && elements.autoUploadSub2api.checked ? getSelectedServiceIds(elements.sub2apiServiceSelect) : [],
         auto_upload_tm: elements.autoUploadTm ? elements.autoUploadTm.checked : false,
         tm_service_ids: elements.autoUploadTm && elements.autoUploadTm.checked ? getSelectedServiceIds(elements.tmServiceSelect) : [],
-        auto_upload_newapi: elements.autoUploadNewapi ? elements.autoUploadNewapi.checked : false,
-        newapi_service_ids: elements.autoUploadNewapi && elements.autoUploadNewapi.checked ? getSelectedServiceIds(elements.newapiServiceSelect) : [],
     };
 
     // 如果选择了数据库中的服务，传递 service_id
     if (serviceId && serviceId !== 'default') {
         requestData.email_service_id = parseInt(serviceId);
     }
-
-    addLog('info', `[系统] 执行方式: ${executionMode}`);
 
     if (isBatchMode) {
         await handleBatchRegistration(requestData);
@@ -583,7 +520,7 @@ async function handleSingleRegistration(requestData) {
 
     } catch (error) {
         addLog('error', `[错误] 启动失败: ${error.message}`);
-        toast.error(error.message + getExecutionModeFailureHint());
+        toast.error(error.message);
         resetButtons();
     }
 }
@@ -863,8 +800,8 @@ function startLogPolling(taskUuid) {
                         // 刷新账号列表
                         loadRecentAccounts();
                     } else if (data.status === 'failed') {
-                        addLog('error', `[错误] 注册失败${getExecutionModeFailureHint()}`);
-                        toast.error(`注册失败${getExecutionModeFailureHint()}`);
+                        addLog('error', '[错误] 注册失败');
+                        toast.error('注册失败');
                     } else if (data.status === 'cancelled') {
                         addLog('warning', '[警告] 任务已取消');
                     }
@@ -905,7 +842,7 @@ function startBatchPolling(batchId) {
                         // 刷新账号列表
                         loadRecentAccounts();
                     } else {
-                        toast.warning(`批量注册完成，但没有成功注册任何账号${getExecutionModeFailureHint()}`);
+                        toast.warning('批量注册完成，但没有成功注册任何账号');
                     }
                 }
             }
@@ -1118,7 +1055,6 @@ function resetButtons() {
     elements.cancelBtn.disabled = true;
     currentTask = null;
     currentBatch = null;
-    // 注意：不重置 isBatchMode，因为用户可能想继续使用批量模式
     // 重置完成标志
     taskCompleted = false;
     batchCompleted = false;
@@ -1248,7 +1184,6 @@ async function handleOutlookBatchRegistration() {
 
     const requestData = {
         service_ids: selectedIds,
-        execution_mode: getCurrentExecutionMode(),
         skip_registered: skipRegistered,
         interval_min: intervalMin,
         interval_max: intervalMax,
@@ -1260,11 +1195,8 @@ async function handleOutlookBatchRegistration() {
         sub2api_service_ids: elements.autoUploadSub2api && elements.autoUploadSub2api.checked ? getSelectedServiceIds(elements.sub2apiServiceSelect) : [],
         auto_upload_tm: elements.autoUploadTm ? elements.autoUploadTm.checked : false,
         tm_service_ids: elements.autoUploadTm && elements.autoUploadTm.checked ? getSelectedServiceIds(elements.tmServiceSelect) : [],
-        auto_upload_newapi: elements.autoUploadNewapi ? elements.autoUploadNewapi.checked : false,
-        newapi_service_ids: elements.autoUploadNewapi && elements.autoUploadNewapi.checked ? getSelectedServiceIds(elements.newapiServiceSelect) : [],
     };
 
-    addLog('info', `[系统] 执行方式: ${requestData.execution_mode}`);
     addLog('info', `[系统] 正在启动 Outlook 批量注册 (${selectedIds.length} 个账户)...`);
 
     try {
@@ -1292,7 +1224,7 @@ async function handleOutlookBatchRegistration() {
 
     } catch (error) {
         addLog('error', `[错误] 启动失败: ${error.message}`);
-        toast.error(error.message + getExecutionModeFailureHint());
+        toast.error(error.message);
         resetButtons();
     }
 }
@@ -1354,11 +1286,11 @@ function connectBatchWebSocket(batchId) {
                                 toast.success(`${batchLabel}注册完成，成功 ${data.success} 个`);
                                 loadRecentAccounts();
                             } else {
-                                toast.warning(`Outlook 批量注册完成，但没有成功注册任何账号${getExecutionModeFailureHint()}`);
+                                toast.warning(`${batchLabel}注册完成，但没有成功注册任何账号`);
                             }
                         } else if (data.status === 'failed') {
                             addLog('error', '[错误] 批量任务执行失败');
-                            toast.error(`批量任务执行失败${getExecutionModeFailureHint()}`);
+                            toast.error('批量任务执行失败');
                         } else if (data.status === 'cancelled' || data.status === 'cancelling') {
                             addLog('warning', '[警告] 批量任务已取消');
                         }
@@ -1478,7 +1410,7 @@ function startOutlookBatchPolling(batchId) {
                         toast.success(`Outlook 批量注册完成，成功 ${data.success} 个`);
                         loadRecentAccounts();
                     } else {
-                        toast.warning(`Outlook 批量注册完成，但没有成功注册任何账号${getExecutionModeFailureHint()}`);
+                        toast.warning('Outlook 批量注册完成，但没有成功注册任何账号');
                     }
                 }
             }

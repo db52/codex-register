@@ -17,7 +17,7 @@ from .temp_mail import TempMailService
 from .duck_mail import DuckMailService
 from .freemail import FreemailService
 from .imap_mail import ImapMailService
-from .cloud_mail import CloudMailService
+from .yyds_mail import YydsMailService
 
 # 注册服务
 EmailServiceFactory.register(EmailServiceType.TEMPMAIL, TempmailService)
@@ -27,7 +27,7 @@ EmailServiceFactory.register(EmailServiceType.TEMP_MAIL, TempMailService)
 EmailServiceFactory.register(EmailServiceType.DUCK_MAIL, DuckMailService)
 EmailServiceFactory.register(EmailServiceType.FREEMAIL, FreemailService)
 EmailServiceFactory.register(EmailServiceType.IMAP_MAIL, ImapMailService)
-EmailServiceFactory.register(EmailServiceType.CLOUD_MAIL, CloudMailService)
+EmailServiceFactory.register(EmailServiceType.YYDS_MAIL, YydsMailService)
 
 # 导出 Outlook 模块的额外内容
 from .outlook.base import (
@@ -40,9 +40,7 @@ from .outlook.base import (
 from .outlook.account import OutlookAccount
 from .outlook.providers import (
     OutlookProvider,
-    IMAPOldProvider,
     IMAPNewProvider,
-    GraphAPIProvider,
 )
 
 __all__ = [
@@ -61,7 +59,7 @@ __all__ = [
     'DuckMailService',
     'FreemailService',
     'ImapMailService',
-    'CloudMailService',
+    'YydsMailService',
     # Outlook 模块
     'ProviderType',
     'EmailMessage',
@@ -70,7 +68,5 @@ __all__ = [
     'ProviderStatus',
     'OutlookAccount',
     'OutlookProvider',
-    'IMAPOldProvider',
     'IMAPNewProvider',
-    'GraphAPIProvider',
 ]

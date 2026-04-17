@@ -5,17 +5,14 @@ Tempmail.lol 邮箱服务实现
 import re
 import time
 import logging
-from typing import Callable, Optional, Dict, Any, List
-from datetime import datetime, timezone
+from typing import Optional, Dict, Any, List
 
-from .base import BaseEmailService, EmailServiceError, EmailServiceType, OTPNoOpenAISenderEmailServiceError, get_email_code_settings
+from .base import BaseEmailService, EmailServiceError, EmailServiceType
 from ..core.http_client import HTTPClient, RequestConfig
 from ..config.constants import OTP_CODE_PATTERN
 
 
 logger = logging.getLogger(__name__)
-
-OTP_SENT_AT_TOLERANCE_SECONDS = 2
 
 
 class TempmailService(BaseEmailService):
@@ -61,39 +58,6 @@ class TempmailService(BaseEmailService):
         # 状态变量（内存缓存，重启后从 DB 按需查询）
         self._email_cache: Dict[str, Dict[str, Any]] = {}
         self._last_check_time: float = 0
-
-    def _parse_message_time(self, value: Any) -> Optional[float]:
-        """解析 Tempmail 邮件时间，兼容 Unix 时间戳与 ISO 8601。"""
-        if value is None or value == "":
-            return None
-
-        if isinstance(value, (int, float)):
-            timestamp = float(value)
-        else:
-            text = str(value).strip()
-            if not text:
-                return None
-
-            try:
-                timestamp = float(text)
-            except ValueError:
-                try:
-                    normalized = text.replace("Z", "+00:00")
-                    timestamp = datetime.fromisoformat(normalized).astimezone(timezone.utc).timestamp()
-                except Exception:
-                    return None
-
-        while timestamp > 1e11:
-            timestamp /= 1000.0
-        return timestamp if timestamp > 0 else None
-
-    def _get_received_timestamp(self, message: Dict[str, Any]) -> Optional[float]:
-        """返回 Tempmail 邮件的接收时间戳。"""
-        for field_name in ("received_at", "date", "created_at", "createdAt", "timestamp"):
-            timestamp = self._parse_message_time(message.get(field_name))
-            if timestamp is not None:
-                return timestamp
-        return None
 
     def _save_token_to_db(self, email: str, token: str) -> None:
         """将邮箱 token 持久化到 Setting 表，key=tempmail_token:{email}"""
@@ -190,7 +154,7 @@ class TempmailService(BaseEmailService):
             email_id: 邮箱 token（如果不提供，从缓存中查找）
             timeout: 超时时间（秒）
             pattern: 验证码正则表达式
-            otp_sent_at: OTP 发送时间戳，只允许使用严格晚于该锚点减去容差后的邮件
+            otp_sent_at: OTP 发送时间戳（Tempmail 服务暂不使用此参数）
 
         Returns:
             验证码字符串，如果超时或未找到返回 None
@@ -212,12 +176,10 @@ class TempmailService(BaseEmailService):
 
         logger.info(f"正在等待邮箱 {email} 的验证码...")
 
-        poll_interval = get_email_code_settings()["poll_interval"]
         start_time = time.time()
         seen_ids = set()
 
         while time.time() - start_time < timeout:
-            self._raise_if_cancelled("等待 Tempmail 验证码时任务已取消")
             try:
                 # 获取邮件列表
                 response = self.http_client.get(
@@ -227,7 +189,7 @@ class TempmailService(BaseEmailService):
                 )
 
                 if response.status_code != 200:
-                    self._sleep_with_cancel(poll_interval)
+                    time.sleep(3)
                     continue
 
                 data = response.json()
@@ -240,41 +202,22 @@ class TempmailService(BaseEmailService):
                 email_list = data.get("emails", []) if isinstance(data, dict) else []
 
                 if not isinstance(email_list, list):
-                    self._sleep_with_cancel(poll_interval)
+                    time.sleep(3)
                     continue
 
-                ordered_emails = self._sort_items_by_message_time(
-                    email_list,
-                    lambda item: item.get("date") if isinstance(item, dict) else None,
-                )
-
-                if ordered_emails:
-                    if not self._batch_has_openai_sender(
-                        ordered_emails,
-                        lambda item: item.get("from") if isinstance(item, dict) else None,
-                    ):
-                        raise OTPNoOpenAISenderEmailServiceError()
-
-                for msg in ordered_emails:
+                for msg in email_list:
                     if not isinstance(msg, dict):
                         continue
 
-                    msg_timestamp = self._get_received_timestamp(msg)
-                    if otp_sent_at is not None:
-                        min_allowed_timestamp = otp_sent_at - OTP_SENT_AT_TOLERANCE_SECONDS
-                        if msg_timestamp is None or msg_timestamp <= min_allowed_timestamp:
-                            continue
-
-                    message_id = str(
-                        msg.get("id")
-                        or msg.get("date")
-                        or msg.get("createdAt")
-                        or f"{msg.get('from', '')}:{msg.get('subject', '')}:{msg_timestamp}"
-                    ).strip()
-                    if not message_id or message_id in seen_ids:
+                    # 使用 date 作为唯一标识
+                    msg_date = msg.get("date", 0)
+                    if not msg_date or msg_date in seen_ids:
                         continue
-                    seen_ids.add(message_id)
-                    message_marker = f"id:{message_id}"
+                    seen_ids.add(msg_date)
+                    message_marker = f"date:{msg_date}" if msg_date else None
+
+                    if self._is_message_before_otp(msg.get("date"), otp_sent_at):
+                        continue
 
                     sender = str(msg.get("from", "")).lower()
                     subject = str(msg.get("subject", ""))
@@ -284,7 +227,7 @@ class TempmailService(BaseEmailService):
                     content = "\n".join([sender, subject, body, html])
 
                     # 检查是否是 OpenAI 邮件
-                    if not self._is_openai_candidate_message(sender, subject, body, html):
+                    if "openai" not in sender and "openai" not in content.lower():
                         continue
 
                     # 提取验证码
@@ -298,12 +241,10 @@ class TempmailService(BaseEmailService):
                         return code
 
             except Exception as e:
-                if isinstance(e, OTPNoOpenAISenderEmailServiceError):
-                    raise
                 logger.debug(f"检查邮件时出错: {e}")
 
             # 等待一段时间再检查
-            self._sleep_with_cancel(poll_interval)
+            time.sleep(3)
 
         logger.warning(f"等待验证码超时: {email}")
         return None
@@ -380,7 +321,7 @@ class TempmailService(BaseEmailService):
         self,
         email: str,
         token: str,
-        callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        callback: callable = None,
         timeout: int = 120
     ) -> Optional[str]:
         """
@@ -395,7 +336,6 @@ class TempmailService(BaseEmailService):
         Returns:
             验证码或 None
         """
-        poll_interval = get_email_code_settings()["poll_interval"]
         start_time = time.time()
         seen_ids = set()
         check_count = 0
@@ -414,7 +354,7 @@ class TempmailService(BaseEmailService):
             try:
                 data = self.get_inbox(token)
                 if not data:
-                    time.sleep(poll_interval)
+                    time.sleep(3)
                     continue
 
                 # 检查 inbox 是否过期
@@ -434,6 +374,7 @@ class TempmailService(BaseEmailService):
                     if not msg_date or msg_date in seen_ids:
                         continue
                     seen_ids.add(msg_date)
+                    message_marker = f"date:{msg_date}" if msg_date else None
 
                     sender = str(msg.get("from", "")).lower()
                     subject = str(msg.get("subject", ""))
@@ -450,6 +391,8 @@ class TempmailService(BaseEmailService):
                     match = re.search(OTP_CODE_PATTERN, content)
                     if match:
                         code = match.group(1)
+                        if not self._accept_verification_code(email, code, message_marker):
+                            continue
                         if callback:
                             callback({
                                 "status": "found",
@@ -477,7 +420,7 @@ class TempmailService(BaseEmailService):
                         "message": "检查邮件时出错"
                     })
 
-            time.sleep(poll_interval)
+            time.sleep(3)
 
         if callback:
             callback({

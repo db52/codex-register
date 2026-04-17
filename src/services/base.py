@@ -5,142 +5,19 @@
 
 import abc
 import logging
-import re
-import time
-from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional, Dict, Any, List, Callable
+from typing import Optional, Dict, Any, List
 from enum import Enum
 
-from ..config.constants import EmailServiceType, OPENAI_EMAIL_SENDERS, OTP_CODE_PATTERN, OTP_CODE_SEMANTIC_PATTERN
-from ..config.settings import get_settings
+from ..config.constants import EmailServiceType
 
 
 logger = logging.getLogger(__name__)
-
-EMAIL_PROVIDER_BACKOFF_BASE_SECONDS = 30
-
-
-def get_email_code_settings() -> dict:
-    """获取验证码等待配置（timeout、poll_interval）"""
-    settings = get_settings()
-    return {
-        "timeout": settings.email_code_timeout,
-        "poll_interval": settings.email_code_poll_interval,
-    }
-EMAIL_PROVIDER_BACKOFF_MAX_SECONDS = 3600
-OTP_TIMEOUT_ERROR_PREFIX = "OTP_TIMEOUT"
-OTP_NO_OPENAI_SENDER_ERROR = "OTP_NO_OPENAI_SENDER"
-
-
-@dataclass(frozen=True)
-class EmailProviderBackoffState:
-    """邮箱供应商退避状态"""
-
-    failures: int = 0
-    delay_seconds: int = 0
-    opened_until: float = 0.0
-    retry_after: Optional[int] = None
-    last_error: Optional[str] = None
-
-    def is_open(self, now: Optional[float] = None) -> bool:
-        now_ts = now if now is not None else time.time()
-        return self.opened_until > now_ts
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "failures": self.failures,
-            "delay_seconds": self.delay_seconds,
-            "opened_until": self.opened_until,
-            "retry_after": self.retry_after,
-            "last_error": self.last_error,
-        }
-
-
-def calculate_adaptive_backoff_delay(
-    failures: int,
-    base_delay: int = EMAIL_PROVIDER_BACKOFF_BASE_SECONDS,
-    max_delay: int = EMAIL_PROVIDER_BACKOFF_MAX_SECONDS,
-    is_timeout: bool = False,
-) -> int:
-    """根据连续失败次数计算指数退避时长"""
-    normalized_failures = max(0, failures)
-    if is_timeout and normalized_failures >= 3:
-        return max_delay
-    exponent = max(0, normalized_failures - 1)
-    return min(base_delay * (2 ** exponent), max_delay)
-
-
-def is_otp_timeout_error(error: object) -> bool:
-    """识别 OTP 超时类错误码。"""
-    if error is None:
-        return False
-    if isinstance(error, OTPTimeoutEmailServiceError):
-        return True
-    error_code = getattr(error, "error_code", "")
-    if isinstance(error_code, str) and error_code.startswith(OTP_TIMEOUT_ERROR_PREFIX):
-        return True
-    return False
-
-
-def apply_adaptive_backoff(
-    current_state: Optional[EmailProviderBackoffState],
-    error: "EmailServiceError",
-    now: Optional[float] = None,
-) -> EmailProviderBackoffState:
-    """在限流场景下推进邮箱供应商退避状态"""
-    state = current_state or EmailProviderBackoffState()
-    now_ts = now if now is not None else time.time()
-    next_failures = state.failures + 1
-    delay_seconds = calculate_adaptive_backoff_delay(
-        next_failures,
-        is_timeout=is_otp_timeout_error(error),
-    )
-    return EmailProviderBackoffState(
-        failures=next_failures,
-        delay_seconds=delay_seconds,
-        opened_until=now_ts + delay_seconds,
-        retry_after=getattr(error, "retry_after", None),
-        last_error=str(error),
-    )
-
-
-def reset_adaptive_backoff() -> EmailProviderBackoffState:
-    """重置邮箱供应商退避状态"""
-    return EmailProviderBackoffState()
 
 
 class EmailServiceError(Exception):
     """邮箱服务异常"""
     pass
-
-
-class RateLimitedEmailServiceError(EmailServiceError):
-    """邮箱服务被限流"""
-
-    def __init__(self, message: str, retry_after: Optional[int] = None):
-        super().__init__(message)
-        self.retry_after = retry_after
-
-
-class OTPTimeoutEmailServiceError(EmailServiceError):
-    """OTP 验证码等待超时。"""
-
-    def __init__(self, message: str, error_code: str = OTP_TIMEOUT_ERROR_PREFIX):
-        super().__init__(message)
-        self.error_code = error_code
-
-
-class OTPNoOpenAISenderEmailServiceError(EmailServiceError):
-    """当前轮询批次未发现 OpenAI 发件人，建议立即重发验证码。"""
-
-    def __init__(self, message: str = "当前邮件批次未发现 OpenAI 发件人", error_code: str = OTP_NO_OPENAI_SENDER_ERROR):
-        super().__init__(message)
-        self.error_code = error_code
-
-
-class EmailServiceCancelledError(EmailServiceError):
-    """邮箱服务在轮询过程中收到取消信号。"""
 
 
 class EmailServiceStatus(Enum):
@@ -169,12 +46,8 @@ class BaseEmailService(abc.ABC):
         self.name = name or f"{service_type.value}_service"
         self._status = EmailServiceStatus.HEALTHY
         self._last_error = None
-        self._provider_backoff = reset_adaptive_backoff()
         self._used_verification_codes: Dict[str, set] = {}
         self._seen_verification_messages: Dict[str, set] = {}
-        self.check_cancelled: Optional[Callable[[], bool]] = None
-
-    _EMAIL_ADDRESS_PATTERN = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 
     @property
     def status(self) -> EmailServiceStatus:
@@ -185,44 +58,6 @@ class BaseEmailService(abc.ABC):
     def last_error(self) -> Optional[str]:
         """获取最后一次错误信息"""
         return self._last_error
-
-    @property
-    def provider_backoff_state(self) -> EmailProviderBackoffState:
-        """获取当前邮箱供应商退避状态"""
-        return self._provider_backoff
-
-    def apply_provider_backoff_state(self, state: Optional[EmailProviderBackoffState]) -> None:
-        """注入外部持久化的邮箱供应商退避状态"""
-        self._provider_backoff = state or reset_adaptive_backoff()
-
-    def set_check_cancelled(self, callback: Optional[Callable[[], bool]]) -> None:
-        """注入外部取消检查回调。"""
-        self.check_cancelled = callback if callable(callback) else None
-
-    def _is_cancelled_requested(self) -> bool:
-        """检查邮箱服务是否收到取消请求。"""
-        callback = self.check_cancelled
-        if not callable(callback):
-            return False
-        try:
-            return bool(callback())
-        except Exception as e:
-            logger.warning(f"检查邮箱服务取消状态失败: {e}")
-            return False
-
-    def _raise_if_cancelled(self, message: str = "任务已取消") -> None:
-        """在轮询/等待阶段响应取消请求。"""
-        if self._is_cancelled_requested():
-            raise EmailServiceCancelledError(message)
-
-    def _sleep_with_cancel(self, seconds: float, chunk_seconds: float = 0.2) -> None:
-        """可响应取消的短分片休眠。"""
-        remaining = max(0.0, float(seconds))
-        while remaining > 0:
-            self._raise_if_cancelled()
-            sleep_for = min(chunk_seconds, remaining)
-            time.sleep(sleep_for)
-            remaining -= sleep_for
 
     @abc.abstractmethod
     def create_email(self, config: Dict[str, Any] = None) -> Dict[str, Any]:
@@ -260,7 +95,7 @@ class BaseEmailService(abc.ABC):
             email_id: 邮箱服务中的 ID（如果需要）
             timeout: 超时时间（秒）
             pattern: 验证码正则表达式
-            otp_sent_at: OTP 发送时间戳，只允许使用严格晚于该锚点的邮件
+            otp_sent_at: OTP 发送时间戳，用于过滤旧邮件
 
         Returns:
             验证码字符串，如果超时或未找到返回 None
@@ -331,66 +166,6 @@ class BaseEmailService(abc.ABC):
                 return email_info
         return None
 
-    def _strip_email_addresses(self, text: str) -> str:
-        """移除文本中的邮箱地址，避免域名数字被误识别为验证码。"""
-        return self._EMAIL_ADDRESS_PATTERN.sub(" ", text or "")
-
-    def _extract_otp_from_text(self, text: str, pattern: Optional[str] = None) -> Optional[str]:
-        """
-        从文本中提取验证码。
-
-        优先语义匹配，再在移除邮箱地址后的文本上做 6 位数字兜底。
-        """
-        if not text:
-            return None
-
-        semantic_match = re.search(OTP_CODE_SEMANTIC_PATTERN, text, re.IGNORECASE)
-        if semantic_match:
-            return semantic_match.group(1)
-
-        fallback_pattern = pattern or OTP_CODE_PATTERN
-        simple_match = re.search(fallback_pattern, self._strip_email_addresses(text))
-        if simple_match:
-            return simple_match.group(1)
-
-        return None
-
-    def _is_openai_sender_value(self, sender: Any) -> bool:
-        """判断单个发件人字段是否属于 OpenAI。"""
-        sender_text = str(sender or "").strip().lower()
-        if not sender_text:
-            return False
-
-        for known_sender in OPENAI_EMAIL_SENDERS:
-            normalized = known_sender.lower()
-            if normalized.startswith(("@", ".")):
-                if normalized in sender_text:
-                    return True
-            elif normalized in sender_text:
-                return True
-        return False
-
-    def _message_mentions_openai(self, *parts: Any) -> bool:
-        """判断若干文本片段中是否提及 OpenAI。"""
-        combined = "\n".join(str(part or "") for part in parts if part is not None).lower()
-        return "openai" in combined if combined else False
-
-    def _is_openai_candidate_message(self, sender: Any = None, *content_parts: Any) -> bool:
-        """判断单封邮件是否可作为 OpenAI 验证码候选邮件。"""
-        return self._is_openai_sender_value(sender) or self._message_mentions_openai(sender, *content_parts)
-
-    def _batch_has_openai_sender(self, items: List[Any], sender_getter) -> bool:
-        """判断当前批次邮件是否至少有一封来自 OpenAI 发件人。"""
-        found_sender_field = False
-        for item in items:
-            sender = sender_getter(item)
-            if sender in (None, ""):
-                continue
-            found_sender_field = True
-            if self._is_openai_sender_value(sender):
-                return True
-        return not found_sender_field
-
     def _get_used_verification_codes(self, email: str) -> set:
         """获取邮箱对应的已使用验证码集合。"""
         key = str(email or "").strip().lower()
@@ -404,29 +179,6 @@ class BaseEmailService(abc.ABC):
         if key not in self._seen_verification_messages:
             self._seen_verification_messages[key] = set()
         return self._seen_verification_messages[key]
-
-    def load_verification_state(
-        self,
-        email: str,
-        used_codes: Optional[List[str]] = None,
-        seen_messages: Optional[List[str]] = None,
-    ) -> None:
-        """将持久化的验证码状态恢复到当前服务实例。"""
-        if used_codes:
-            self._get_used_verification_codes(email).update(
-                str(code) for code in used_codes if code
-            )
-        if seen_messages:
-            self._get_seen_verification_messages(email).update(
-                str(marker) for marker in seen_messages if marker
-            )
-
-    def export_verification_state(self, email: str) -> Dict[str, List[str]]:
-        """导出当前邮箱的验证码状态，用于跨请求复用。"""
-        return {
-            "used_codes": sorted(self._get_used_verification_codes(email)),
-            "seen_messages": sorted(self._get_seen_verification_messages(email)),
-        }
 
     def _remember_verification_code(self, email: str, code: str) -> bool:
         """记录验证码；若已用过则返回 False。"""
@@ -476,14 +228,14 @@ class BaseEmailService(abc.ABC):
             return value.timestamp()
 
         if isinstance(value, (int, float)):
-            return self._normalize_unix_timestamp(float(value))
+            return float(value)
 
         text = str(value).strip()
         if not text:
             return None
 
         try:
-            return self._normalize_unix_timestamp(float(text))
+            return float(text)
         except ValueError:
             pass
 
@@ -492,15 +244,6 @@ class BaseEmailService(abc.ABC):
             return datetime.fromisoformat(normalized).timestamp()
         except ValueError:
             return None
-
-    def _normalize_unix_timestamp(self, value: float) -> float:
-        """将秒/毫秒/微秒级 Unix 时间统一归一到秒。"""
-        absolute = abs(value)
-        if absolute >= 1e14:
-            return value / 1_000_000
-        if absolute >= 1e11:
-            return value / 1_000
-        return value
 
     def _is_message_before_otp(self, message_time: Any, otp_sent_at: Optional[float], tolerance_seconds: int = 1) -> bool:
         """
@@ -516,14 +259,6 @@ class BaseEmailService(abc.ABC):
             return False
 
         return message_ts + tolerance_seconds < otp_sent_at
-
-    def _sort_items_by_message_time(self, items: List[Any], value_getter) -> List[Any]:
-        """按邮件时间倒序排列，优先处理最新邮件。"""
-        return sorted(
-            items,
-            key=lambda item: self._parse_message_timestamp(value_getter(item)) or float("-inf"),
-            reverse=True,
-        )
 
     def wait_for_email(
         self,
@@ -549,12 +284,12 @@ class BaseEmailService(abc.ABC):
             邮件信息字典，如果超时返回 None
         """
         import time
+        from datetime import datetime
 
         start_time = time.time()
         last_email_id = None
 
         while time.time() - start_time < timeout:
-            self._raise_if_cancelled("等待邮件时任务已取消")
             try:
                 emails = self.list_emails()
                 for email_info in emails:
@@ -597,7 +332,7 @@ class BaseEmailService(abc.ABC):
             except Exception as e:
                 logger.warning(f"等待邮件时出错: {e}")
 
-            self._sleep_with_cancel(check_interval)
+            time.sleep(check_interval)
 
         return None
 
@@ -644,16 +379,8 @@ class BaseEmailService(abc.ABC):
         if success:
             self._status = EmailServiceStatus.HEALTHY
             self._last_error = None
-            self._provider_backoff = reset_adaptive_backoff()
         else:
-            if isinstance(error, RateLimitedEmailServiceError) or is_otp_timeout_error(error):
-                self._status = EmailServiceStatus.UNAVAILABLE
-                self._provider_backoff = apply_adaptive_backoff(
-                    self._provider_backoff,
-                    error,
-                )
-            else:
-                self._status = EmailServiceStatus.DEGRADED
+            self._status = EmailServiceStatus.DEGRADED
             if error:
                 self._last_error = str(error)
 

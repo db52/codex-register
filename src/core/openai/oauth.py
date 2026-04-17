@@ -126,7 +126,8 @@ def _post_form(
     url: str,
     data: Dict[str, str],
     timeout: int = 30,
-    proxy_url: Optional[str] = None
+    proxy_url: Optional[str] = None,
+    fingerprint: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """
     发送 POST 表单请求
@@ -136,6 +137,7 @@ def _post_form(
         data: 表单数据
         timeout: 超时时间
         proxy_url: 代理 URL
+        fingerprint: 浏览器指纹 dict（来自 OpenAIHTTPClient.fingerprint）
 
     Returns:
         响应 JSON 数据
@@ -148,11 +150,20 @@ def _post_form(
             "https": proxy_url,
         }
 
+    if fingerprint:
+        ua = fingerprint["ua"]
+        impersonate = fingerprint["impersonate"]
+    else:
+        ua = (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
+        impersonate = "chrome120"
+
     headers = {
         "Content-Type": "application/x-www-form-urlencoded",
         "Accept": "application/json",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "User-Agent": ua,
     }
 
     try:
@@ -163,7 +174,7 @@ def _post_form(
             headers=headers,
             timeout=timeout,
             proxies=proxies,
-            impersonate="chrome"
+            impersonate=impersonate
         )
 
         if response.status_code != 200:
@@ -240,7 +251,8 @@ def submit_callback_url(
     redirect_uri: str = OAUTH_REDIRECT_URI,
     client_id: str = OAUTH_CLIENT_ID,
     token_url: str = OAUTH_TOKEN_URL,
-    proxy_url: Optional[str] = None
+    proxy_url: Optional[str] = None,
+    fingerprint: Optional[Dict[str, Any]] = None
 ) -> str:
     """
     处理 OAuth 回调 URL，获取访问令牌
@@ -282,7 +294,8 @@ def submit_callback_url(
             "redirect_uri": redirect_uri,
             "code_verifier": code_verifier,
         },
-        proxy_url=proxy_url
+        proxy_url=proxy_url,
+        fingerprint=fingerprint
     )
 
     access_token = (token_resp.get("access_token") or "").strip()
@@ -349,7 +362,8 @@ class OAuthManager:
         self,
         callback_url: str,
         expected_state: str,
-        code_verifier: str
+        code_verifier: str,
+        fingerprint: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """处理 OAuth 回调"""
         result_json = submit_callback_url(
@@ -359,7 +373,8 @@ class OAuthManager:
             redirect_uri=self.redirect_uri,
             client_id=self.client_id,
             token_url=self.token_url,
-            proxy_url=self.proxy_url
+            proxy_url=self.proxy_url,
+            fingerprint=fingerprint
         )
         return json.loads(result_json)
 

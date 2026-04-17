@@ -5,11 +5,15 @@
 
 import abc
 import logging
+import re
+import time
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Callable
 from enum import Enum
 
-from ..config.constants import EmailServiceType
+from ..config.constants import EmailServiceType, OPENAI_EMAIL_SENDERS, OTP_CODE_PATTERN, OTP_CODE_SEMANTIC_PATTERN
+from ..config.settings import get_settings
 
 
 logger = logging.getLogger(__name__)
@@ -18,6 +22,80 @@ logger = logging.getLogger(__name__)
 class EmailServiceError(Exception):
     """邮箱服务异常"""
     pass
+
+
+EMAIL_PROVIDER_BACKOFF_BASE_SECONDS = 30
+EMAIL_PROVIDER_BACKOFF_MAX_SECONDS = 3600
+OTP_TIMEOUT_ERROR_PREFIX = "OTP_TIMEOUT"
+OTP_NO_OPENAI_SENDER_ERROR = "OTP_NO_OPENAI_SENDER"
+
+
+def get_email_code_settings() -> dict:
+    """获取验证码等待配置（timeout、poll_interval）"""
+    settings = get_settings()
+    return {
+        "timeout": settings.email_code_timeout,
+        "poll_interval": settings.email_code_poll_interval,
+    }
+
+
+@dataclass(frozen=True)
+class EmailProviderBackoffState:
+    """邮箱供应商退避状态"""
+
+    failures: int = 0
+    delay_seconds: int = 0
+    opened_until: float = 0.0
+    retry_after: Optional[int] = None
+    last_error: Optional[str] = None
+
+    def is_open(self, now: Optional[float] = None) -> bool:
+        now_ts = now if now is not None else time.time()
+        return self.opened_until > now_ts
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "failures": self.failures,
+            "delay_seconds": self.delay_seconds,
+            "opened_until": self.opened_until,
+            "retry_after": self.retry_after,
+            "last_error": self.last_error,
+        }
+
+
+def is_retryable_email_error(error_code: Optional[str]) -> bool:
+    """判断错误码是否属于可重试的邮箱服务错误。"""
+    if isinstance(error_code, str) and error_code.startswith(OTP_TIMEOUT_ERROR_PREFIX):
+        return True
+    return False
+
+
+class RateLimitedEmailServiceError(EmailServiceError):
+    """邮箱服务被限流"""
+
+    def __init__(self, message: str, retry_after: Optional[int] = None):
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
+class OTPTimeoutEmailServiceError(EmailServiceError):
+    """OTP 验证码等待超时。"""
+
+    def __init__(self, message: str, error_code: str = OTP_TIMEOUT_ERROR_PREFIX):
+        super().__init__(message)
+        self.error_code = error_code
+
+
+class OTPNoOpenAISenderEmailServiceError(EmailServiceError):
+    """当前轮询批次未发现 OpenAI 发件人，建议立即重发验证码。"""
+
+    def __init__(self, message: str = "当前邮件批次未发现 OpenAI 发件人", error_code: str = OTP_NO_OPENAI_SENDER_ERROR):
+        super().__init__(message)
+        self.error_code = error_code
+
+
+class EmailServiceCancelledError(EmailServiceError):
+    """邮箱服务在轮询过程中收到取消信号。"""
 
 
 class EmailServiceStatus(Enum):

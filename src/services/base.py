@@ -10,6 +10,7 @@ from typing import Optional, Dict, Any, List
 from enum import Enum
 
 from ..config.constants import EmailServiceType
+from ..config.settings import get_settings
 
 
 logger = logging.getLogger(__name__)
@@ -18,6 +19,34 @@ logger = logging.getLogger(__name__)
 class EmailServiceError(Exception):
     """邮箱服务异常"""
     pass
+
+
+class RateLimitedEmailServiceError(EmailServiceError):
+    """邮箱服务被限流"""
+
+    def __init__(self, message: str, retry_after: Optional[int] = None):
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
+class OTPTimeoutEmailServiceError(EmailServiceError):
+    """OTP 验证码等待超时。"""
+
+    def __init__(self, message: str, error_code: str = "OTP_TIMEOUT"):
+        super().__init__(message)
+        self.error_code = error_code
+
+
+class OTPNoOpenAISenderEmailServiceError(EmailServiceError):
+    """当前轮询批次未发现 OpenAI 发件人，建议立即重发验证码。"""
+
+    def __init__(self, message: str = "当前邮件批次未发现 OpenAI 发件人", error_code: str = "OTP_NO_OPENAI_SENDER"):
+        super().__init__(message)
+        self.error_code = error_code
+
+
+class EmailServiceCancelledError(EmailServiceError):
+    """邮箱服务在轮询过程中收到取消信号。"""
 
 
 class EmailServiceStatus(Enum):
@@ -461,6 +490,15 @@ class EmailServiceFactory:
             服务类，如果未注册返回 None
         """
         return cls._registry.get(service_type)
+
+
+def get_email_code_settings() -> dict:
+    """获取验证码等待配置（timeout、poll_interval）"""
+    settings = get_settings()
+    return {
+        "timeout": settings.email_code_timeout,
+        "poll_interval": settings.email_code_poll_interval,
+    }
 
 
 # 简化的工厂函数

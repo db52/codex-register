@@ -15,7 +15,7 @@ from email.policy import default as email_policy
 from html import unescape
 from typing import Optional, Dict, Any, List
 
-from .base import BaseEmailService, EmailServiceError, EmailServiceType
+from .base import BaseEmailService, EmailServiceError, EmailServiceType, OTPNoOpenAISenderEmailServiceError, RateLimitedEmailServiceError, get_email_code_settings
 from ..core.http_client import HTTPClient, RequestConfig
 from ..config.constants import OTP_CODE_PATTERN
 
@@ -95,10 +95,7 @@ class TempMailService(BaseEmailService):
                     charset = part.get_content_charset() or "utf-8"
                     text = payload.decode(charset, errors="replace") if payload else ""
                 except Exception:
-                    try:
-                        text = part.get_content()
-                    except Exception:
-                        text = ""
+                    text = str(part.get_payload() or "")
 
                 if content_type == "text/html":
                     text = re.sub(r"<[^>]+>", " ", text)
@@ -109,10 +106,7 @@ class TempMailService(BaseEmailService):
                 charset = message.get_content_charset() or "utf-8"
                 body = payload.decode(charset, errors="replace") if payload else ""
             except Exception:
-                try:
-                    body = message.get_content()
-                except Exception:
-                    body = str(message.get_payload() or "")
+                body = str(message.get_payload() or "")
 
             if "html" in (message.get_content_type() or "").lower():
                 body = re.sub(r"<[^>]+>", " ", body)
@@ -200,8 +194,19 @@ class TempMailService(BaseEmailService):
                     error_msg = f"{error_msg} - {error_data}"
                 except Exception:
                     error_msg = f"{error_msg} - {response.text[:200]}"
-                self.update_status(False, EmailServiceError(error_msg))
-                raise EmailServiceError(error_msg)
+                retry_after = None
+                if response.status_code == 429:
+                    retry_after_header = response.headers.get("Retry-After")
+                    if retry_after_header:
+                        try:
+                            retry_after = max(1, int(retry_after_header))
+                        except ValueError:
+                            retry_after = None
+                    error = RateLimitedEmailServiceError(error_msg, retry_after=retry_after)
+                else:
+                    error = EmailServiceError(error_msg)
+                self.update_status(False, error)
+                raise error
 
             try:
                 return response.json()
@@ -296,6 +301,7 @@ class TempMailService(BaseEmailService):
         logger.info(f"正在从 TempMail 邮箱 {email} 获取验证码...")
 
         start_time = time.time()
+        poll_interval = get_email_code_settings()["poll_interval"]
         seen_mail_ids: set = set()
 
         # 优先使用用户级 JWT，回退到 admin API 先注释用户级API
@@ -303,6 +309,7 @@ class TempMailService(BaseEmailService):
         # jwt = cached.get("jwt")
 
         while time.time() - start_time < timeout:
+            self._raise_if_cancelled("等待 TempMail 验证码时任务已取消")
             try:
                 # if jwt:
                 #     response = self._make_request(
@@ -321,10 +328,31 @@ class TempMailService(BaseEmailService):
                 # /user_api/mails 和 /admin/mails 返回格式相同: {"results": [...], "total": N}
                 mails = response.get("results", [])
                 if not isinstance(mails, list):
-                    time.sleep(3)
+                    self._sleep_with_cancel(poll_interval)
                     continue
 
-                for mail in mails:
+                ordered_mails = self._sort_items_by_message_time(
+                    mails,
+                    lambda item: (
+                        item.get("createdAt")
+                        or item.get("created_at")
+                        or item.get("receivedAt")
+                        or item.get("received_at")
+                    ) if isinstance(item, dict) else None,
+                )
+
+                if ordered_mails:
+                    if not self._batch_has_openai_sender(
+                        ordered_mails,
+                        lambda item: (
+                            item.get("from")
+                            or item.get("sender")
+                            or item.get("fromAddress")
+                        ) if isinstance(item, dict) else None,
+                    ):
+                        raise OTPNoOpenAISenderEmailServiceError()
+
+                for mail in ordered_mails:
                     mail_id = mail.get("id")
                     if not mail_id or mail_id in seen_mail_ids:
                         continue
@@ -346,12 +374,11 @@ class TempMailService(BaseEmailService):
                     content = f"{sender}\n{subject}\n{body_text}\n{raw_text}".strip()
 
                     # 只处理 OpenAI 邮件
-                    if "openai" not in sender and "openai" not in content.lower():
+                    if not self._is_openai_candidate_message(sender, subject, body_text, raw_text):
                         continue
 
-                    match = re.search(pattern, content)
-                    if match:
-                        code = match.group(1)
+                    code = self._extract_otp_from_text(content, pattern)
+                    if code:
                         if not self._accept_verification_code(email, code, message_marker):
                             continue
                         logger.info(f"从 TempMail 邮箱 {email} 找到验证码: {code}")
@@ -359,9 +386,11 @@ class TempMailService(BaseEmailService):
                         return code
 
             except Exception as e:
+                if isinstance(e, OTPNoOpenAISenderEmailServiceError):
+                    raise
                 logger.debug(f"检查 TempMail 邮件时出错: {e}")
 
-            time.sleep(3)
+            self._sleep_with_cancel(poll_interval)
 
         logger.warning(f"等待 TempMail 验证码超时: {email}")
         return None

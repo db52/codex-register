@@ -24,7 +24,8 @@ let availableServices = {
     moe_mail: { available: false, services: [] },
     temp_mail: { available: false, services: [] },
     duck_mail: { available: false, services: [] },
-    freemail: { available: false, services: [] }
+    freemail: { available: false, services: [] },
+    cloud_mail: { available: false, services: [] }
 };
 
 // WebSocket 相关变量
@@ -94,6 +95,9 @@ const elements = {
     autoUploadTm: document.getElementById('auto-upload-tm'),
     tmServiceSelectGroup: document.getElementById('tm-service-select-group'),
     tmServiceSelect: document.getElementById('tm-service-select'),
+    autoUploadNewapi: document.getElementById('auto-upload-newapi'),
+    newapiServiceSelectGroup: document.getElementById('newapi-service-select-group'),
+    newapiServiceSelect: document.getElementById('newapi-service-select'),
 };
 
 // 初始化
@@ -113,6 +117,7 @@ async function initAutoUploadOptions() {
         loadServiceSelect('/cpa-services?enabled=true', elements.cpaServiceSelect, elements.autoUploadCpa, elements.cpaServiceSelectGroup),
         loadServiceSelect('/sub2api-services?enabled=true', elements.sub2apiServiceSelect, elements.autoUploadSub2api, elements.sub2apiServiceSelectGroup),
         loadServiceSelect('/tm-services?enabled=true', elements.tmServiceSelect, elements.autoUploadTm, elements.tmServiceSelectGroup),
+        loadServiceSelect('/newapi-services?enabled=true', elements.newapiServiceSelect, elements.autoUploadNewapi, elements.newapiServiceSelectGroup),
     ]);
 }
 
@@ -372,6 +377,23 @@ function updateEmailServiceOptions() {
 
         select.appendChild(optgroup);
     }
+
+    // Cloud Mail
+    if (availableServices.cloud_mail && availableServices.cloud_mail.available) {
+        const optgroup = document.createElement('optgroup');
+        optgroup.label = `☁️ Cloud Mail (${availableServices.cloud_mail.count} 个服务)`;
+
+        availableServices.cloud_mail.services.forEach(service => {
+            const option = document.createElement('option');
+            option.value = `cloud_mail:${service.id}`;
+            option.textContent = service.name + (service.default_domain ? ` (@${service.default_domain})` : '');
+            option.dataset.type = 'cloud_mail';
+            option.dataset.serviceId = service.id;
+            optgroup.appendChild(option);
+        });
+
+        select.appendChild(optgroup);
+    }
 }
 
 // 处理邮箱服务切换
@@ -421,6 +443,11 @@ function handleServiceChange(e) {
         const service = availableServices.freemail.services.find(s => s.id == id);
         if (service) {
             addLog('info', `[系统] 已选择 Freemail 服务: ${service.name}`);
+        }
+    } else if (type === 'cloud_mail') {
+        const service = availableServices.cloud_mail.services.find(s => s.id == id);
+        if (service) {
+            addLog('info', `[系统] 已选择 Cloud Mail 服务: ${service.name}`);
         }
     }
 }
@@ -480,6 +507,8 @@ async function handleStartRegistration(e) {
         sub2api_service_ids: elements.autoUploadSub2api && elements.autoUploadSub2api.checked ? getSelectedServiceIds(elements.sub2apiServiceSelect) : [],
         auto_upload_tm: elements.autoUploadTm ? elements.autoUploadTm.checked : false,
         tm_service_ids: elements.autoUploadTm && elements.autoUploadTm.checked ? getSelectedServiceIds(elements.tmServiceSelect) : [],
+        auto_upload_newapi: elements.autoUploadNewapi ? elements.autoUploadNewapi.checked : false,
+        newapi_service_ids: elements.autoUploadNewapi && elements.autoUploadNewapi.checked ? getSelectedServiceIds(elements.newapiServiceSelect) : [],
     };
 
     // 如果选择了数据库中的服务，传递 service_id
@@ -1055,6 +1084,7 @@ function resetButtons() {
     elements.cancelBtn.disabled = true;
     currentTask = null;
     currentBatch = null;
+    // 注意：不重置 isBatchMode，因为用户可能想继续使用批量模式
     // 重置完成标志
     taskCompleted = false;
     batchCompleted = false;
@@ -1195,6 +1225,8 @@ async function handleOutlookBatchRegistration() {
         sub2api_service_ids: elements.autoUploadSub2api && elements.autoUploadSub2api.checked ? getSelectedServiceIds(elements.sub2apiServiceSelect) : [],
         auto_upload_tm: elements.autoUploadTm ? elements.autoUploadTm.checked : false,
         tm_service_ids: elements.autoUploadTm && elements.autoUploadTm.checked ? getSelectedServiceIds(elements.tmServiceSelect) : [],
+        auto_upload_newapi: elements.autoUploadNewapi ? elements.autoUploadNewapi.checked : false,
+        newapi_service_ids: elements.autoUploadNewapi && elements.autoUploadNewapi.checked ? getSelectedServiceIds(elements.newapiServiceSelect) : [],
     };
 
     addLog('info', `[系统] 正在启动 Outlook 批量注册 (${selectedIds.length} 个账户)...`);

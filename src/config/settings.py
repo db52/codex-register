@@ -10,6 +10,8 @@ from pydantic import BaseModel, field_validator
 from pydantic.types import SecretStr
 from dataclasses import dataclass
 
+from .constants import APP_NAME, APP_VERSION, DEFAULT_WEBUI_HOST, DEFAULT_WEBUI_PORT
+
 
 class SettingCategory(str, Enum):
     """设置分类"""
@@ -42,13 +44,13 @@ SETTING_DEFINITIONS: Dict[str, SettingDefinition] = {
     # 应用信息
     "app_name": SettingDefinition(
         db_key="app.name",
-        default_value="OpenAI/Codex CLI 自动注册系统",
+        default_value=APP_NAME,
         category=SettingCategory.GENERAL,
         description="应用名称"
     ),
     "app_version": SettingDefinition(
         db_key="app.version",
-        default_value="2.0.0",
+        default_value=APP_VERSION,
         category=SettingCategory.GENERAL,
         description="应用版本"
     ),
@@ -70,13 +72,13 @@ SETTING_DEFINITIONS: Dict[str, SettingDefinition] = {
     # Web UI 配置
     "webui_host": SettingDefinition(
         db_key="webui.host",
-        default_value="0.0.0.0",
+        default_value=DEFAULT_WEBUI_HOST,
         category=SettingCategory.WEBUI,
         description="Web UI 监听地址"
     ),
     "webui_port": SettingDefinition(
         db_key="webui.port",
-        default_value=8000,
+        default_value=DEFAULT_WEBUI_PORT,
         category=SettingCategory.WEBUI,
         description="Web UI 监听端口"
     ),
@@ -136,7 +138,7 @@ SETTING_DEFINITIONS: Dict[str, SettingDefinition] = {
     ),
     "openai_redirect_uri": SettingDefinition(
         db_key="openai.redirect_uri",
-        default_value="http://localhost:15555/auth/callback",
+        default_value="http://localhost:1455/auth/callback",
         category=SettingCategory.OPENAI,
         description="OpenAI OAuth 回调 URI"
     ),
@@ -356,8 +358,26 @@ SETTING_DEFINITIONS: Dict[str, SettingDefinition] = {
         category=SettingCategory.EMAIL,
         description="验证码轮询间隔（秒）"
     ),
+    "email_code_resend_max_retries": SettingDefinition(
+        db_key="email_code.resend_max_retries",
+        default_value=2,
+        category=SettingCategory.EMAIL,
+        description="收件箱未找到验证码时，最多重新发送验证码的次数"
+    ),
+    "email_code_non_openai_sender_resend_max_retries": SettingDefinition(
+        db_key="email_code.non_openai_sender_resend_max_retries",
+        default_value=1,
+        category=SettingCategory.EMAIL,
+        description="检测到非 OpenAI 发件人干扰时，最多重新发送验证码的次数"
+    ),
 
     # Outlook 配置
+    "outlook_provider_priority": SettingDefinition(
+        db_key="outlook.provider_priority",
+        default_value=["imap_old", "imap_new", "graph_api"],
+        category=SettingCategory.EMAIL,
+        description="Outlook 提供者优先级"
+    ),
     "outlook_health_failure_threshold": SettingDefinition(
         db_key="outlook.health_failure_threshold",
         default_value=5,
@@ -376,11 +396,11 @@ SETTING_DEFINITIONS: Dict[str, SettingDefinition] = {
         category=SettingCategory.EMAIL,
         description="Outlook OAuth 默认 Client ID"
     ),
-    "outlook_use_idle": SettingDefinition(
-        db_key="outlook.use_idle",
+    "outlook_require_recipient_match": SettingDefinition(
+        db_key="outlook.require_recipient_match",
         default_value=True,
         category=SettingCategory.EMAIL,
-        description="使用 IMAP IDLE 替代轮询获取验证码（降低延迟，默认开启）"
+        description="Outlook 验证码识别时是否校验收件人匹配"
     ),
 }
 
@@ -407,9 +427,12 @@ SETTING_TYPES: Dict[str, Type] = {
     "cpa_enabled": bool,
     "email_code_timeout": int,
     "email_code_poll_interval": int,
+    "email_code_resend_max_retries": int,
+    "email_code_non_openai_sender_resend_max_retries": int,
+    "outlook_provider_priority": list,
     "outlook_health_failure_threshold": int,
     "outlook_health_disable_duration": int,
-    "outlook_use_idle": bool,
+    "outlook_require_recipient_match": bool,
 }
 
 # 需要作为 SecretStr 处理的字段
@@ -584,8 +607,8 @@ class Settings(BaseModel):
     """
 
     # 应用信息
-    app_name: str = "OpenAI/Codex CLI 自动注册系统"
-    app_version: str = "2.0.0"
+    app_name: str = APP_NAME
+    app_version: str = APP_VERSION
     debug: bool = False
 
     # 数据库配置
@@ -608,8 +631,8 @@ class Settings(BaseModel):
         return v
 
     # Web UI 配置
-    webui_host: str = "0.0.0.0"
-    webui_port: int = 8000
+    webui_host: str = DEFAULT_WEBUI_HOST
+    webui_port: int = DEFAULT_WEBUI_PORT
     webui_secret_key: SecretStr = SecretStr("your-secret-key-change-in-production")
     webui_access_password: SecretStr = SecretStr("admin123")
 
@@ -622,7 +645,7 @@ class Settings(BaseModel):
     openai_client_id: str = "app_EMoamEEZ73f0CkXaXp7hrann"
     openai_auth_url: str = "https://auth.openai.com/oauth/authorize"
     openai_token_url: str = "https://auth.openai.com/oauth/token"
-    openai_redirect_uri: str = "http://localhost:15555/auth/callback"
+    openai_redirect_uri: str = "http://localhost:1455/auth/callback"
     openai_scope: str = "openid email profile offline_access"
 
     # 代理配置
@@ -638,25 +661,40 @@ class Settings(BaseModel):
     proxy_dynamic_api_key_header: str = "X-API-Key"
     proxy_dynamic_result_field: str = ""
 
-    @property
-    def proxy_url(self) -> Optional[str]:
-        """获取完整的代理 URL"""
-        if not self.proxy_enabled:
-            return None
+    def get_proxy_url(self, db=None) -> Optional[str]:
+        """获取当前可用的代理 URL（三路优先级）
 
-        if self.proxy_type == "http":
-            scheme = "http"
-        elif self.proxy_type == "socks5":
-            scheme = "socks5"
-        else:
-            return None
+        优先级：动态代理 > 代理池（默认/随机）> 静态代理 > None
 
-        auth = ""
-        if self.proxy_username and self.proxy_password:
-            auth = f"{self.proxy_username}:{self.proxy_password.get_secret_value()}@"
+        Args:
+            db: 可选的数据库 session，传入时检查代理池；不传则跳过代理池
+        """
+        # 1. 动态代理
+        if self.proxy_dynamic_enabled and self.proxy_dynamic_api_url:
+            return self.proxy_dynamic_api_url
 
-        return f"{scheme}://{auth}{self.proxy_host}:{self.proxy_port}"
+        # 2 & 3. 代理池（优先 is_default，否则随机）
+        if db is not None:
+            from src.database import crud
+            proxy = crud.get_random_proxy(db)
+            if proxy is not None:
+                return proxy.proxy_url
 
+        # 4. 静态代理
+        if self.proxy_enabled:
+            if self.proxy_type == "http":
+                scheme = "http"
+            elif self.proxy_type == "socks5":
+                scheme = "socks5"
+            else:
+                return None
+            auth = ""
+            if self.proxy_username and self.proxy_password:
+                auth = f"{self.proxy_username}:{self.proxy_password.get_secret_value()}@"
+            return f"{scheme}://{auth}{self.proxy_host}:{self.proxy_port}"
+
+        # 5. 无可用代理
+        return None
     # 注册配置
     registration_max_retries: int = 3
     registration_timeout: int = 120
@@ -692,12 +730,15 @@ class Settings(BaseModel):
     # 验证码配置
     email_code_timeout: int = 120
     email_code_poll_interval: int = 3
+    email_code_resend_max_retries: int = 2
+    email_code_non_openai_sender_resend_max_retries: int = 1
 
     # Outlook 配置
+    outlook_provider_priority: List[str] = ["imap_old", "imap_new", "graph_api"]
     outlook_health_failure_threshold: int = 5
     outlook_health_disable_duration: int = 60
     outlook_default_client_id: str = "24d9a0ed-8787-4584-883c-2fd79308940a"
-    outlook_use_idle: bool = True
+    outlook_require_recipient_match: bool = True
 
 
 # 全局配置实例

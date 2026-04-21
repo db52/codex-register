@@ -6,11 +6,9 @@ Freemail 邮箱服务实现
 import re
 import time
 import logging
-import random
-import string
 from typing import Optional, Dict, Any, List
 
-from .base import BaseEmailService, EmailServiceError, EmailServiceType
+from .base import BaseEmailService, EmailServiceError, EmailServiceType, OTPNoOpenAISenderEmailServiceError, RateLimitedEmailServiceError, get_email_code_settings
 from ..core.http_client import HTTPClient, RequestConfig
 from ..config.constants import OTP_CODE_PATTERN
 
@@ -96,8 +94,19 @@ class FreemailService(BaseEmailService):
                     error_msg = f"{error_msg} - {error_data}"
                 except Exception:
                     error_msg = f"{error_msg} - {response.text[:200]}"
-                self.update_status(False, EmailServiceError(error_msg))
-                raise EmailServiceError(error_msg)
+                retry_after = None
+                if response.status_code == 429:
+                    retry_after_header = response.headers.get("Retry-After")
+                    if retry_after_header:
+                        try:
+                            retry_after = max(1, int(retry_after_header))
+                        except ValueError:
+                            retry_after = None
+                    error = RateLimitedEmailServiceError(error_msg, retry_after=retry_after)
+                else:
+                    error = EmailServiceError(error_msg)
+                self.update_status(False, error)
+                raise error
 
             try:
                 return response.json()
@@ -200,17 +209,40 @@ class FreemailService(BaseEmailService):
         """
         logger.info(f"正在从 Freemail 邮箱 {email} 获取验证码...")
 
+        poll_interval = get_email_code_settings()["poll_interval"]
         start_time = time.time()
         seen_mail_ids: set = set()
 
         while time.time() - start_time < timeout:
+            self._raise_if_cancelled("等待 Freemail 验证码时任务已取消")
             try:
                 mails = self._make_request("GET", "/api/emails", params={"mailbox": email, "limit": 20})
                 if not isinstance(mails, list):
-                    time.sleep(3)
+                    self._sleep_with_cancel(poll_interval)
                     continue
 
-                for mail in mails:
+                ordered_mails = self._sort_items_by_message_time(
+                    mails,
+                    lambda item: (
+                        item.get("created_at")
+                        or item.get("createdAt")
+                        or item.get("received_at")
+                        or item.get("receivedAt")
+                    ) if isinstance(item, dict) else None,
+                )
+
+                if ordered_mails:
+                    sender_values = [
+                        mail for mail in ordered_mails
+                        if isinstance(mail, dict) and mail.get("sender")
+                    ]
+                    if sender_values and not self._batch_has_openai_sender(
+                        sender_values,
+                        lambda item: item.get("sender"),
+                    ):
+                        raise OTPNoOpenAISenderEmailServiceError()
+
+                for mail in ordered_mails:
                     mail_id = mail.get("id")
                     if not mail_id or mail_id in seen_mail_ids:
                         continue
@@ -230,22 +262,11 @@ class FreemailService(BaseEmailService):
                     
                     content = f"{sender}\n{subject}\n{preview}"
                     
-                    if "openai" not in content.lower():
+                    if not self._is_openai_candidate_message(sender, subject, preview):
                         continue
 
-                    # 尝试直接使用 Freemail 提取的验证码
-                    v_code = mail.get("verification_code")
-                    if v_code:
-                        if not self._accept_verification_code(email, str(v_code), message_marker):
-                            continue
-                        logger.info(f"从 Freemail 邮箱 {email} 找到验证码: {v_code}")
-                        self.update_status(True)
-                        return v_code
-
-                    # 如果没有直接提供，通过正则匹配 preview
-                    match = re.search(pattern, content)
-                    if match:
-                        code = match.group(1)
+                    code = self._extract_otp_from_text(content, pattern)
+                    if code:
                         if not self._accept_verification_code(email, code, message_marker):
                             continue
                         logger.info(f"从 Freemail 邮箱 {email} 找到验证码: {code}")
@@ -256,9 +277,8 @@ class FreemailService(BaseEmailService):
                     try:
                         detail = self._make_request("GET", f"/api/email/{mail_id}")
                         full_content = str(detail.get("content", "")) + "\n" + str(detail.get("html_content", ""))
-                        match = re.search(pattern, full_content)
-                        if match:
-                            code = match.group(1)
+                        code = self._extract_otp_from_text(full_content, pattern)
+                        if code:
                             if not self._accept_verification_code(email, code, message_marker):
                                 continue
                             logger.info(f"从 Freemail 邮箱 {email} 找到验证码: {code}")
@@ -267,10 +287,20 @@ class FreemailService(BaseEmailService):
                     except Exception as e:
                         logger.debug(f"获取 Freemail 邮件详情失败: {e}")
 
+                    v_code = str(mail.get("verification_code") or "").strip()
+                    if re.fullmatch(r"\d{6}", v_code):
+                        if not self._accept_verification_code(email, v_code, message_marker):
+                            continue
+                        logger.info(f"从 Freemail 邮箱 {email} 找到验证码: {v_code}")
+                        self.update_status(True)
+                        return v_code
+
             except Exception as e:
+                if isinstance(e, OTPNoOpenAISenderEmailServiceError):
+                    raise
                 logger.debug(f"检查 Freemail 邮件时出错: {e}")
 
-            time.sleep(3)
+            self._sleep_with_cancel(poll_interval)
 
         logger.warning(f"等待 Freemail 验证码超时: {email}")
         return None
